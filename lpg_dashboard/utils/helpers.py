@@ -1,0 +1,139 @@
+# utils/helpers.py
+"""Helper functions for the dashboard"""
+
+import streamlit as st
+import pandas as pd
+import numpy as np
+from .constants import (
+    get_region, normalize_country, get_iso,
+    SEVERITY_COLORS, SEVERITY_ORDER, PLOTLY_DARK
+)
+
+
+def extract_spark_vector_prob(x):
+    """Extract probability from PySpark VectorUDT"""
+    try:
+        if isinstance(x, dict) and 'values' in x:
+            return float(x['values'][-1])
+        elif isinstance(x, (list, np.ndarray)):
+            return float(x[-1])
+        elif hasattr(x, 'item'):
+            return float(x.item())
+        return float(x)
+    except (TypeError, ValueError, IndexError):
+        return 0.0
+
+
+def severity_badge(severity):
+    """Return HTML badge for severity level"""
+    badge_classes = {
+        'Strong': 'badge-strong',
+        'Moderate': 'badge-moderate',
+        'Weak': 'badge-weak',
+        'Normal': 'badge-normal'
+    }
+    cls = badge_classes.get(severity, 'badge-normal')
+    return f'<span class="{cls}">{severity}</span>'
+
+
+def col_sum(df, col):
+    """Safe column sum"""
+    if df is not None and col in df.columns and not df.empty:
+        return int(df[col].sum())
+    return 0
+
+
+def table_limit(label, default=15):
+    """Get table row limit based on toggle"""
+    show_all = st.toggle("Show all rows", value=False, key=f"showall_{label}")
+    return 0 if show_all else default
+
+
+def add_region(df, col='country'):
+    """Add region column to dataframe using safe get_region()"""
+    if df is not None and col in df.columns and not df.empty:
+        df = df.copy()
+        df['region'] = df[col].apply(lambda x: get_region(normalize_country(x)))
+    return df
+
+
+def add_iso(df, col='country'):
+    """Add ISO codes for plotting"""
+    if df is not None and col in df.columns and not df.empty:
+        df = df.copy()
+        df['iso'] = df[col].apply(get_iso)
+    return df
+
+
+def section_tag(label):
+    """Display section tag"""
+    st.markdown(f'<div class="section-tag">{label}</div>', unsafe_allow_html=True)
+
+
+def apply_plotly_dark(fig, height=None):
+    """Apply dark theme to plotly figure"""
+    fig.update_layout(**PLOTLY_DARK)
+    if height:
+        fig.update_layout(height=height)
+    return fig
+
+
+def safe_sort_severity(df, severity_col='ShockSeverity'):
+    """Sort dataframe by severity order"""
+    if severity_col in df.columns:
+        df = df.copy()
+        df[severity_col] = pd.Categorical(
+            df[severity_col],
+            categories=SEVERITY_ORDER,
+            ordered=True
+        )
+        df = df.sort_values(severity_col)
+    return df
+
+
+def get_structural_anomaly_score(df, country):
+    """Get structural anomaly score for a country"""
+    if df is None or df.empty:
+        return 0
+    
+    country_row = df[df['country'] == country]
+    if len(country_row) == 0:
+        return 0
+    
+    # Use actual column names from your data
+    score_col = 'composite_country_anomaly_score'
+    if score_col in country_row.columns:
+        return int(country_row.iloc[0][score_col])
+    
+    # Fallback: calculate from individual flags
+    flag_cols = ['lof_country_flag', 'ocsvm_country_flag', 'if_country_flag', 'cp_country_flag']
+    existing_flags = [c for c in flag_cols if c in country_row.columns]
+    if existing_flags:
+        return int(country_row[existing_flags].sum(axis=1).iloc[0])
+    
+    return 0
+
+
+def get_yearly_anomaly_count(df, country, year=None):
+    """Get yearly anomaly count for a country"""
+    if df is None or df.empty:
+        return 0
+    
+    country_df = df[df['country'] == country]
+    if year:
+        country_df = country_df[country_df['year'] == year]
+    
+    if len(country_df) == 0:
+        return 0
+    
+    # Look for composite score column
+    score_col = 'composite_yearly_anomaly_score'
+    if score_col in country_df.columns:
+        return int(country_df[score_col].sum())
+    
+    # Fallback: count flag columns
+    flag_cols = [c for c in country_df.columns if c.endswith('_flag') and c != 'cp_country_flag']
+    if flag_cols:
+        return int(country_df[flag_cols].sum(axis=1).iloc[0] if len(country_df) == 1 else country_df[flag_cols].sum().sum())
+    
+    return 0

@@ -1,0 +1,8 @@
+
+FINAL SYNTHESIZED INSIGHTS (Updated 2026-04-02 05:18):
+
+1. Overall Stability: 4 countries show high vulnerability to shocks.
+2. Structural Shifts: 534 breaks detected across the timeline.
+3. Network Centrality: Influential hubs identified via PageRank and Degree metrics.
+4. Dynamic Behavior: 906 switches indicate high supply regime mobility.
+5. Global Impact: External events continue to drive significant supply variance.

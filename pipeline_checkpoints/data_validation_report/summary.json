@@ -1,0 +1,23 @@
+{
+  "generated_at": "2026-04-01T04:57:50.217661",
+  "total_rows": 96842,
+  "unique_rows": 96842,
+  "duplicate_rows": 0,
+  "total_nulls": 0,
+  "null_per_column": {
+    "country": 0,
+    "product": 0,
+    "indicator": 0,
+    "year": 0,
+    "Periodicity": 0,
+    "value": 0,
+    "unit": 0
+  },
+  "dtype_issues": [],
+  "negative_values": 1426,
+  "zero_values": 3406,
+  "year_min": 1990,
+  "year_max": 2024,
+  "year_range_ok": true,
+  "validation_passed": true
+}

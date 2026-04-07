@@ -1,0 +1,15 @@
+EWMA → pipeline_checkpoints/anomaly_ewma/part-*.parquet
+IQR → pipeline_checkpoints/anomaly_iqr/part-*.parquet
+Isolation Forest → pipeline_checkpoints/anomaly_isolation_forest/part-*.parquet
+LOF → pipeline_checkpoints/anomaly_lof/part-*.parquet
+LSTM Autoencoder → pipeline_checkpoints/anomaly_lstm/part-*.parquet + models/lstm_autoencoder_model.keras
+Moving Avg Robust → pipeline_checkpoints/anomaly_moving_avg_robust/part-*.parquet
+OCSVM → pipeline_checkpoints/anomaly_ocsvm/part-*.parquet
+Percentile → pipeline_checkpoints/anomaly_percentile/part-*.parquet
+Prophet → pipeline_checkpoints/anomaly_prophet/part-*.parquet
+ARIMA → pipeline_checkpoints/arima_forecast_results/part-*.parquet
+Clusters (KMeans/DBSCAN) → pipeline_checkpoints/clusters/ + dbscan_results/
+RF Shock → models/rf_shock_model/ (stages/metadata confirmed above) + rf_predictions/
+Granger Causality → pipeline_checkpoints/granger_causality_results/
+Cox PH → pipeline_checkpoints/coxph_coefficients.parquet/
+Change Points → pipeline_checkpoints/change_points/part-*.parquet
