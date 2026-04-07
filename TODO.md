@@ -1,12 +1,37 @@
-# Fix rf_model_metadata Missing Error
-Status: 🔄 In Progress
+# LPGSupplyAnalysis Debug: Fix tab4_ml.py Pylance Errors
+*Status: 4/6 complete* | Target: Zero Pylance errors
 
-## Steps:
-- [ ] 1. Update lpg_dashboard/utils/data_loader.py: Improve load_spark_model_metadata to read models/rf_shock_model/metadata/*.txt first, parse JSON, return realistic RF params {'numTrees': 100, 'maxDepth': 10, 'impurity': 'gini', 'featureSubsetStrategy': 'auto'}
-- [ ] 2. Create pipeline_checkpoints/rf_shock_model_spark/stages/0_RandomForestClassifier/metadata/part-00000-dummy.txt with matching JSON metadata
-- [ ] 3. Test: Execute Python snippet to verify load_all_data()['rf_model_metadata'] returns dict with params
-- [ ] 4. Verify in Streamlit app: Refresh tab4_ml.py, check RF hyperparameters display (Trees: 100 etc.) instead of N/A
-- [ ] 5. Mark complete & attempt_completion
+✅ **Phase 1**: Add missing imports **✓ COMPLETE**  
+✅ **Phase 2**: Create TODO.md **✓ COMPLETE**  
+✅ **Phase 3**: Hardcode ML params (`scaler_type=standard` etc.) **✓ COMPLETE**  
+✅ **Phase 4**: Move standalone ML demo inside `tab_comb:` **✓ COMPLETE**  
+⏳ **Phase 5**: Clean up unused imports/vars  
+⏳ **Phase 6**: Test run + completion
 
-**Current Step: 1/5**
+✅ **Phase 1**: Add missing imports (Path, sklearn) **✓ COMPLETE**  
+✅ **Phase 2**: Create this TODO.md **✓ COMPLETE**  
+🔄 **Phase 3**: Test imports → check remaining errors **RUNNING**  
+⏳ **Phase 4**: Fix data scoping (data, rf_pred, clusters vars)  
+⏳ **Phase 5**: Organize standalone ML code into render()  
+⏳ **Phase 6**: Full test + attempt_completion  
+
+**Next**: Phase 3 verification + hardcoded params (per user: skip sidebar)
+
+
+## Approved Plan (Modified: Skip sidebar widgets)
+✅ **Phase 1**: Add missing imports (Path, sklearn)  
+✅ **Phase 2**: Create this TODO.md  
+🔄 **Phase 3**: Test imports → check remaining errors  
+⏳ **Phase 4**: Fix data scoping (data, rf_pred, clusters vars)  
+⏳ **Phase 5**: Organize standalone ML code into render()  
+⏳ **Phase 6**: Full test + attempt_completion  
+
+---
+
+## Next Action
+**Apply Phase 1 imports** to resolve 12 critical sklearn/Path errors.
+
+**Runtime check**: `streamlit run lpg_dashboard/app.py` → Tab 4 (no crashes expected post-imports)
+
+**Estimated**: 90 seconds to Phase 3
 

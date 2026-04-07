@@ -173,172 +173,178 @@ def render(data, df_sev, filters):
             ts_years = years_full
             ts_supply = None
         
-        # Generate synthetic or use real data
         if ts_supply is None:
-            rng = np.random.default_rng(abs(hash(selected_country)) % (2**31))
-            base_supply = 30000 + rng.normal(0, 5000)
-            ts_supply = list(base_supply + np.cumsum(rng.normal(0, 300, len(ts_years))))
-        
-        # Create time series plot with improved spacing
-        fig_ts = go.Figure()
-        
-        # Main supply line with area fill
-        fig_ts.add_trace(go.Scatter(
-            x=ts_years,
-            y=ts_supply,
-            mode='lines',
-            name='Total Supply',
-            line=dict(color='#5bc0de', width=2.5),
-            fill='tozeroy',
-            fillcolor='rgba(91,192,222,0.15)',
-            hovertemplate='Year: %{x}<br>Supply: %{y:,.0f} ktoe<extra></extra>'
-        ))
-        
-        # Add moving average
-        if len(ts_supply) > 3:
-            ma_window = min(5, len(ts_supply) // 2)
-            ma = pd.Series(ts_supply).rolling(window=ma_window, center=True).mean()
+            st.warning(f"No time series supply data available for {selected_country} in the selected range.")
+            fig_ts = go.Figure()
+            fig_ts.update_layout(
+                height=450,
+                xaxis_title='Year',
+                yaxis_title='Supply (ktoe)',
+                annotations=[dict(text="No Data Available", showarrow=False, font=dict(size=16))]
+            )
+            apply_plotly_dark(fig_ts)
+            st.plotly_chart(fig_ts, use_container_width=True)
+        else:
+            # Create time series plot with improved spacing
+            fig_ts = go.Figure()
+            
+            # Main supply line with area fill
             fig_ts.add_trace(go.Scatter(
                 x=ts_years,
-                y=ma,
+                y=ts_supply,
                 mode='lines',
-                name=f'{ma_window}-Year Trend',
-                line=dict(color='#f0ad4e', width=2, dash='dash'),
-                hovertemplate='Trend: %{y:,.0f} ktoe<extra></extra>'
+                name='Total Supply',
+                line=dict(color='#5bc0de', width=2.5),
+                fill='tozeroy',
+                fillcolor='rgba(91,192,222,0.15)',
+                hovertemplate='Year: %{x}<br>Supply: %{y:,.0f} ktoe<extra></extra>'
             ))
-        
-        # LSTM anomalies
-        lstm_df = data.get('anomaly_lstm')
-        if lstm_df is not None and filters.get('show_lstm', True):
-            lstm_country = lstm_df[
-                (lstm_df['country'] == selected_country) & 
-                (lstm_df.get('lstm_anomaly_flag', pd.Series()) == 1)
-            ]
-            for _, row in lstm_country.iterrows():
-                year = row.get('year', 0)
-                if year and year_range[0] <= year <= year_range[1]:
-                    fig_ts.add_vline(
-                        x=year, line_dash='dot', line_color='#ea5455', line_width=2,
-                        annotation_text='LSTM', annotation_position='top',
-                        annotation_font_size=9
-                    )
-        
-        # Prophet anomalies
-        prophet_df = data.get('anomaly_prophet')
-        if prophet_df is not None and filters.get('show_prophet', True):
-            prophet_country = prophet_df[
-                (prophet_df['country'] == selected_country) & 
-                (prophet_df.get('prophet_anomaly_flag', pd.Series()) == 1)
-            ]
-            for _, row in prophet_country.iterrows():
-                year = row.get('year', 0)
-                if year and year_range[0] <= year <= year_range[1]:
-                    fig_ts.add_vline(
-                        x=year, line_dash='dot', line_color='#f0ad4e', line_width=2,
-                        annotation_text='Prophet', annotation_position='bottom',
-                        annotation_font_size=9
-                    )
-        
-        # EWMA anomalies as markers
-        ewma_df = data.get('anomaly_ewma')
-        if ewma_df is not None and filters.get('show_ewma', True):
-            ewma_country = ewma_df[
-                (ewma_df['country'] == selected_country) & 
-                (ewma_df.get('ewma_anomaly_flag', pd.Series()) == 1)
-            ]
-            for _, row in ewma_country.iterrows():
-                year = row.get('year', 0)
-                if year and year_range[0] <= year <= year_range[1]:
-                    fig_ts.add_trace(go.Scatter(
-                        x=[year], y=[max(ts_supply) * 1.05],
-                        mode='markers', 
-                        marker=dict(symbol='diamond', size=10, color='#28c76f'),
-                        name='EWMA', 
-                        showlegend=False,
-                        hovertemplate=f'EWMA Anomaly: {year}<extra></extra>'
-                    ))
-        
-        # Change points (Regime Shifts)
-        if cp_df is not None:
-            cp_country = cp_df[cp_df['country'] == selected_country]
-            cp_col = 'year_change_point' if 'year_change_point' in cp_df.columns else 'year'
-            for _, row in cp_country.iterrows():
-                cp_year = row.get(cp_col, 0)
-                if cp_year and year_range[0] <= cp_year <= year_range[1]:
-                    fig_ts.add_vline(
-                        x=cp_year, line_dash='dash', line_color='#ea5455', line_width=2.5,
-                        annotation_text='Regime Shift', annotation_position='bottom',
-                        annotation_font_size=10, annotation_font_color='#ea5455'
-                    )
-        
-        # Update layout with proper x-axis spacing
-        fig_ts.update_layout(
-            xaxis_title='Year',
-            yaxis_title='Supply (ktoe)',
-            height=450,
-            hovermode='x unified',
-            legend=dict(
-                orientation='h', 
-                yanchor='bottom', 
-                y=1.02, 
-                xanchor='center', 
-                x=0.5,
-                font=dict(size=10)
-            ),
-            xaxis=dict(
-                tickmode='linear',
-                tick0=year_range[0],
-                dtick=5,  # Tick every 5 years
-                tickangle=0,
-                gridcolor='#1e3a5f',
-                showgrid=True,
-                showline=True,
-                linecolor='#1e3a5f'
-            ),
-            yaxis=dict(
-                gridcolor='#1e3a5f',
-                showgrid=True,
-                showline=True,
-                linecolor='#1e3a5f'
-            ),
-            margin=dict(l=50, r=50, t=50, b=50)
-        )
-        apply_plotly_dark(fig_ts)
-        st.plotly_chart(fig_ts, use_container_width=True)
-        
-        # Supply statistics with proper spacing
-        if len(ts_supply) >= 2:
-            start_val = ts_supply[0]
-            end_val = ts_supply[-1]
-            pct_change = ((end_val - start_val) / start_val) * 100 if start_val > 0 else 0
-            max_val = max(ts_supply)
-            min_val = min(ts_supply)
-            volatility = np.std(ts_supply)
             
-            # Use columns for statistics
-            col_stat1, col_stat2, col_stat3, col_stat4 = st.columns(4)
-            col_stat1.metric(f"Supply ({year_range[0]})", f"{start_val:,.0f}")
-            col_stat2.metric(f"Supply ({year_range[1]})", f"{end_val:,.0f}", delta=f"{pct_change:+.1f}%")
-            col_stat3.metric("Peak Supply", f"{max_val:,.0f}")
-            col_stat4.metric("Volatility (Std)", f"{volatility:,.0f}")
+            # Add moving average
+            if len(ts_supply) > 3:
+                ma_window = min(5, len(ts_supply) // 2)
+                ma = pd.Series(ts_supply).rolling(window=ma_window, center=True).mean()
+                fig_ts.add_trace(go.Scatter(
+                    x=ts_years,
+                    y=ma,
+                    mode='lines',
+                    name=f'{ma_window}-Year Trend',
+                    line=dict(color='#f0ad4e', width=2, dash='dash'),
+                    hovertemplate='Trend: %{y:,.0f} ktoe<extra></extra>'
+                ))
             
-            st.markdown("---")
+            # LSTM anomalies
+            lstm_df = data.get('anomaly_lstm')
+            if lstm_df is not None and filters.get('show_lstm', True):
+                lstm_country = lstm_df[
+                    (lstm_df['country'] == selected_country) & 
+                    (lstm_df.get('lstm_anomaly_flag', pd.Series()) == 1)
+                ]
+                for _, row in lstm_country.iterrows():
+                    year = row.get('year', 0)
+                    if year and year_range[0] <= year <= year_range[1]:
+                        fig_ts.add_vline(
+                            x=year, line_dash='dot', line_color='#ea5455', line_width=2,
+                            annotation_text='LSTM', annotation_position='top',
+                            annotation_font_size=9
+                        )
             
-            # Insight box with proper spacing
-            st.markdown("""
-            <div style="background: linear-gradient(135deg, #0d2137, #0a2744); 
-                        padding: 16px; 
-                        border-radius: 10px; 
-                        margin: 16px 0;
-                        border-left: 4px solid #5bc0de;">
-                <b>💡 Understanding This Chart</b><br><br>
-                • <b>Blue area:</b> Total supply trajectory over time<br>
-                • <b>Orange dashed line:</b> Rolling average showing underlying trend<br>
-                • <b>Colored markers/lines:</b> Anomalies detected by different methods<br>
-                • <b>Red dashed vertical lines:</b> Regime shifts (fundamental supply changes)<br><br>
-                <b>Why it matters:</b> Countries with frequent anomalies or regime shifts have less predictable supply chains and require more active risk management.
-            </div>
-            """, unsafe_allow_html=True)
+            # Prophet anomalies
+            prophet_df = data.get('anomaly_prophet')
+            if prophet_df is not None and filters.get('show_prophet', True):
+                prophet_country = prophet_df[
+                    (prophet_df['country'] == selected_country) & 
+                    (prophet_df.get('prophet_anomaly_flag', pd.Series()) == 1)
+                ]
+                for _, row in prophet_country.iterrows():
+                    year = row.get('year', 0)
+                    if year and year_range[0] <= year <= year_range[1]:
+                        fig_ts.add_vline(
+                            x=year, line_dash='dot', line_color='#f0ad4e', line_width=2,
+                            annotation_text='Prophet', annotation_position='bottom',
+                            annotation_font_size=9
+                        )
+            
+            # EWMA anomalies as markers
+            ewma_df = data.get('anomaly_ewma')
+            if ewma_df is not None and filters.get('show_ewma', True):
+                ewma_country = ewma_df[
+                    (ewma_df['country'] == selected_country) & 
+                    (ewma_df.get('ewma_anomaly_flag', pd.Series()) == 1)
+                ]
+                for _, row in ewma_country.iterrows():
+                    year = row.get('year', 0)
+                    if year and year_range[0] <= year <= year_range[1]:
+                        fig_ts.add_trace(go.Scatter(
+                            x=[year], y=[max(ts_supply) * 1.05],
+                            mode='markers', 
+                            marker=dict(symbol='diamond', size=10, color='#28c76f'),
+                            name='EWMA', 
+                            showlegend=False,
+                            hovertemplate=f'EWMA Anomaly: {year}<extra></extra>'
+                        ))
+            
+            # Change points (Regime Shifts)
+            if cp_df is not None:
+                cp_country = cp_df[cp_df['country'] == selected_country]
+                cp_col = 'year_change_point' if 'year_change_point' in cp_df.columns else 'year'
+                for _, row in cp_country.iterrows():
+                    cp_year = row.get(cp_col, 0)
+                    if cp_year and year_range[0] <= cp_year <= year_range[1]:
+                        fig_ts.add_vline(
+                            x=cp_year, line_dash='dash', line_color='#ea5455', line_width=2.5,
+                            annotation_text='Regime Shift', annotation_position='bottom',
+                            annotation_font_size=10, annotation_font_color='#ea5455'
+                        )
+            
+            # Update layout with proper x-axis spacing
+            fig_ts.update_layout(
+                xaxis_title='Year',
+                yaxis_title='Supply (ktoe)',
+                height=450,
+                hovermode='x unified',
+                legend=dict(
+                    orientation='h', 
+                    yanchor='bottom', 
+                    y=1.02, 
+                    xanchor='center', 
+                    x=0.5,
+                    font=dict(size=10)
+                ),
+                xaxis=dict(
+                    tickmode='linear',
+                    tick0=year_range[0],
+                    dtick=5,  # Tick every 5 years
+                    tickangle=0,
+                    gridcolor='#1e3a5f',
+                    showgrid=True,
+                    showline=True,
+                    linecolor='#1e3a5f'
+                ),
+                yaxis=dict(
+                    gridcolor='#1e3a5f',
+                    showgrid=True,
+                    showline=True,
+                    linecolor='#1e3a5f'
+                ),
+                margin=dict(l=50, r=50, t=50, b=50)
+            )
+            apply_plotly_dark(fig_ts)
+            st.plotly_chart(fig_ts, use_container_width=True)
+            
+            # Supply statistics with proper spacing
+            if len(ts_supply) >= 2:
+                start_val = ts_supply[0]
+                end_val = ts_supply[-1]
+                pct_change = ((end_val - start_val) / start_val) * 100 if start_val > 0 else 0
+                max_val = max(ts_supply)
+                min_val = min(ts_supply)
+                volatility = np.std(ts_supply)
+                
+                # Use columns for statistics
+                col_stat1, col_stat2, col_stat3, col_stat4 = st.columns(4)
+                col_stat1.metric(f"Supply ({year_range[0]})", f"{start_val:,.0f}")
+                col_stat2.metric(f"Supply ({year_range[1]})", f"{end_val:,.0f}", delta=f"{pct_change:+.1f}%")
+                col_stat3.metric("Peak Supply", f"{max_val:,.0f}")
+                col_stat4.metric("Volatility (Std)", f"{volatility:,.0f}")
+                
+                st.markdown("---")
+                
+                # Insight box with proper spacing
+                st.markdown("""
+                <div style="background: linear-gradient(135deg, #0d2137, #0a2744); 
+                            padding: 16px; 
+                            border-radius: 10px; 
+                            margin: 16px 0;
+                            border-left: 4px solid #5bc0de;">
+                    <b>💡 Understanding This Chart</b><br><br>
+                    • <b>Blue area:</b> Total supply trajectory over time<br>
+                    • <b>Orange dashed line:</b> Rolling average showing underlying trend<br>
+                    • <b>Colored markers/lines:</b> Anomalies detected by different methods<br>
+                    • <b>Red dashed vertical lines:</b> Regime shifts (fundamental supply changes)<br><br>
+                    <b>Why it matters:</b> Countries with frequent anomalies or regime shifts have less predictable supply chains and require more active risk management.
+                </div>
+                """, unsafe_allow_html=True)
     
     # =========================================================
     # RIGHT COLUMN - ANOMALY FLAGS & RADAR CHART

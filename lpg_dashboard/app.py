@@ -4,7 +4,9 @@ import streamlit as st
 import pandas as pd
 
 from utils.css import apply_css
-from utils.data_loader import load_all_data, get_sample_data
+from utils.data_loader import load_all_data
+
+
 from utils.helpers import add_region, safe_sort_severity
 from utils.constants import SEVERITY_ORDER
 
@@ -148,15 +150,9 @@ def main():
     # Safe extraction
     df_sev = data.get("shock_severity")
 
-    # ---------------- FALLBACK ----------------
-    if df_sev is None or not isinstance(df_sev, pd.DataFrame):
-        st.warning("Using sample data (real pipeline not found)")
-        data = get_sample_data()
-        df_sev = data.get("shock_severity")
-
     # ---------------- VALIDATION ----------------
     if df_sev is None or df_sev.empty:
-        st.error("No data available")
+        st.error("Pipeline checkpoint data not found. Please run the data pipeline first.")
         st.stop()
 
     # ---------------- CLEANING ----------------
