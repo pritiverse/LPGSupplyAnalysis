@@ -29,10 +29,8 @@ import glob
 import warnings
 
 from pathlib import Path
-from sklearn.preprocessing import StandardScaler, RobustScaler
-from sklearn.ensemble import IsolationForest
-from sklearn.neighbors import LocalOutlierFactor
-from sklearn.svm import OneClassSVM
+
+from utils import helpers
 
 warnings.filterwarnings("ignore", category=UserWarning)
 
@@ -76,40 +74,6 @@ def anomaly_flag_count(df, *cols) -> int | None:
 def get_countries(df) -> list[str]:
     c = fcol(df, "country", "Country", "COUNTRY")
     return sorted(df[c].dropna().unique().tolist()) if c else []
-@st.cache_data(ttl=3600)
-def load_spark_parquet(name: str) -> pd.DataFrame:
-    """Load all parquet parts from pipeline_checkpoints/<name> folder."""
-    folder = Path.cwd() / "pipeline_checkpoints" / name
-    files = sorted(glob.glob(str(folder / "part-*.parquet")) + glob.glob(str(folder / "*.parquet")))
-    if not files:
-        st.error(f"❌ No data found in `{folder}`. Please run the LPG pipeline first.")
-        st.stop()
-    df = pd.concat([pd.read_parquet(f) for f in files], ignore_index=True)
-    if 'country' in df.columns:
-        df['country'] = df['country'].astype(str).str.strip().str.title()
-    return df
-@st.cache_data
-def prepare_data(scaler_type: str = "standard"):
-    """Load data, select numeric features, and scale."""
-    df_raw = load_spark_parquet("country_pca_features")
-    df_raw = df_raw.drop_duplicates(subset=['country']).reset_index(drop=True)
-    
-    feature_cols = [c for c in df_raw.columns if df_raw[c].dtype in ['float64', 'int64'] and c != 'country']
-    if not feature_cols:
-        st.error("No numeric features found in the data.")
-        st.stop()
-    
-    X = df_raw[feature_cols].fillna(df_raw[feature_cols].mean())
-    scaler = StandardScaler() if scaler_type == "standard" else RobustScaler()
-    X_scaled = scaler.fit_transform(X)
-    
-    return df_raw, X_scaled, feature_cols, scaler
-
-def create_composite_scores(if_pred, lof_pred, svm_pred, if_score, lof_score, svm_score):
-    """Combine flags and average scores from all three models."""
-    comp_flag = ((if_pred == -1) | (lof_pred == -1) | (svm_pred == -1)).astype(int)
-    comp_score = np.mean([if_score, lof_score, svm_score], axis=0)
-    return comp_flag, comp_score
 
 def filter_df(df: pd.DataFrame, selected: list, search: str) -> pd.DataFrame:
     c = fcol(df, "country", "Country", "COUNTRY")
@@ -448,37 +412,39 @@ def render(data: dict, df_sev, filters):
     st.markdown(CSS, unsafe_allow_html=True)
 
     # ── Unpack all checkpoints ────────────────────────────────────────────
-    iso_forest  = data.get("anomaly_isolation_forest")
-    lof         = data.get("anomaly_lof")
-    ocsvm_df    = data.get("anomaly_ocsvm")
-    ewma        = data.get("anomaly_ewma")
-    iqr_df      = data.get("anomaly_iqr")
-    percentile  = data.get("anomaly_percentile")
-    mov_avg     = data.get("anomaly_moving_avg_robust")
-    prophet     = data.get("anomaly_prophet")
-    lstm        = data.get("anomaly_lstm")
-    adash       = data.get("anomaly_dashboard")
-    combined_yr = data.get("combined_yearly_anomalies")
-    combined_co = data.get("combined_country_anomalies")
-    clusters    = data.get("clusters")
-    dbscan_df   = data.get("dbscan_results")
-    temporal_cl = data.get("temporal_clusters")
-    pca_feat    = data.get("country_pca_features")
-    arima       = data.get("arima_forecast_results")
-    change_pts  = data.get("change_points")
-    rf_pred     = data.get("rf_predictions")
-    rf_meta     = data.get("rf_model_metadata")
-    granger     = data.get("granger_causality_results")
-    cox_coef    = data.get("coxph_coefficients")
-    cox_prep    = data.get("coxph_prepared_data")
-    net_metrics = data.get("network_metrics")
-    net_comm    = data.get("network_communities")
-    shock_score = data.get("shock_score")
-    shock_sev   = data.get("shock_severity")
-    shock_valid = data.get("shock_validation_advanced")
-    shock_top   = data.get("shock_top_countries")
-    contagion   = data.get("contagion_features")
-    features_df = data.get("features_timeseries") if ok(data.get("features_timeseries")) else data.get("04_features")
+    iso_forest  = helpers.safe_get_data(data, "anomaly_isolation_forest")
+    lof         = helpers.safe_get_data(data, "anomaly_lof")
+    ocsvm_df    = helpers.safe_get_data(data, "anomaly_ocsvm")
+    ewma        = helpers.safe_get_data(data, "anomaly_ewma")
+    iqr_df      = helpers.safe_get_data(data, "anomaly_iqr")
+    percentile  = helpers.safe_get_data(data, "anomaly_percentile")
+    mov_avg     = helpers.safe_get_data(data, "anomaly_moving_avg_robust")
+    prophet     = helpers.safe_get_data(data, "anomaly_prophet")
+    lstm        = helpers.safe_get_data(data, "anomaly_lstm")
+    adash       = helpers.safe_get_data(data, "anomaly_dashboard")
+    combined_yr = helpers.safe_get_data(data, "combined_yearly_anomalies")
+    combined_co = helpers.safe_get_data(data, "combined_country_anomalies")
+    clusters    = helpers.safe_get_data(data, "clusters")
+    dbscan_df   = helpers.safe_get_data(data, "dbscan_results")
+    temporal_cl = helpers.safe_get_data(data, "temporal_clusters")
+    pca_feat    = helpers.safe_get_data(data, "country_pca_features")
+    arima       = helpers.safe_get_data(data, "arima_forecast_results")
+    change_pts  = helpers.safe_get_data(data, "change_points")
+    rf_pred     = helpers.safe_get_data(data, "rf_predictions")
+    rf_meta     = helpers.safe_get_data(data, "rf_model_metadata")
+    granger     = helpers.safe_get_data(data, "granger_causality_results")
+    cox_coef    = helpers.safe_get_data(data, "coxph_coefficients")
+    cox_prep    = helpers.safe_get_data(data, "coxph_prepared_data")
+    net_metrics = helpers.safe_get_data(data, "network_metrics")
+    net_comm    = helpers.safe_get_data(data, "network_communities")
+    shock_score = helpers.safe_get_data(data, "shock_score")
+    shock_sev   = helpers.safe_get_data(data, "shock_severity")
+    shock_valid = helpers.safe_get_data(data, "shock_validation_advanced")
+    shock_top   = helpers.safe_get_data(data, "shock_top_countries")
+    contagion   = helpers.safe_get_data(data, "contagion_features")
+    features_df = helpers.safe_get_data(data, "features_timeseries")
+    if features_df is None:
+        features_df = helpers.safe_get_data(data, "04_features")
 
     # ── Derived KPI values ────────────────────────────────────────────────
     if_n    = anomaly_flag_count(iso_forest, "if_anomaly_flag", "anomaly")
@@ -704,150 +670,44 @@ def render(data: dict, df_sev, filters):
             "amber"
         ), unsafe_allow_html=True)
 
-        # ------------------------------------------------------------
-        # Structural demo params (hardcoded - no sidebar)
-        # ------------------------------------------------------------
-        scaler_type = "standard"
-        contamination = 5
-        n_neighbors = 20
-        nu_svm = 0.05
-        svm_kernel = "rbf"
-
-        # ------------------------------------------------------------
-        # Load and prepare data
-        # ------------------------------------------------------------
-        df_raw, X_scaled, feature_cols, scaler = prepare_data(scaler_type)
-
-        st.markdown("# 🏗️ Structural Anomaly Detection")
-        # Removed: "### Identify countries with unusual LPG supply profiles"
-        # Removed metrics row (🌍 Countries, 📊 Features, 📐 Scaling)
-
-        # ------------------------------------------------------------
-        # Run models (cached based on parameters)
-        # ------------------------------------------------------------
-        @st.cache_data
-        def run_models(X, contamination, n_neighbors, nu_svm, svm_kernel):
-            """Fit all three models and return predictions + scores."""
-            # Isolation Forest
-            if_model = IsolationForest(contamination=contamination/100.0, random_state=42, n_jobs=-1)
-            if_pred = if_model.fit_predict(X)
-            if_score = -if_model.score_samples(X)
-            
-            # Local Outlier Factor
-            lof_model = LocalOutlierFactor(n_neighbors=n_neighbors, contamination=contamination/100.0, n_jobs=-1)
-            lof_pred = lof_model.fit_predict(X)
-            lof_score = -lof_model.negative_outlier_factor_
-            
-            # One-Class SVM
-            svm_model = OneClassSVM(nu=nu_svm, kernel=svm_kernel, gamma='scale')
-            svm_pred = svm_model.fit_predict(X)
-            svm_score = -svm_model.decision_function(X)
-            
-            return if_pred, if_score, lof_pred, lof_score, svm_pred, svm_score
-
-        if_pred, if_score, lof_pred, lof_score, svm_pred, svm_score = run_models(
-            X_scaled, contamination, n_neighbors, nu_svm, svm_kernel
+        comp_df = helpers.safe_get_data(data, "anomaly_composite")
+        show_structural_model(
+            comp_df, "Composite Structural Score",
+            fcol(comp_df, "composite_score_avg", "composite_score", "score"),
+            fcol(comp_df, "composite_flag", "flag"),
+            "Reds_r", AMBER,
         )
 
-        comp_flag, comp_score = create_composite_scores(if_pred, lof_pred, svm_pred,
-                                                        if_score, lof_score, svm_score)
-
-        # Build results dataframe
-        df_results = df_raw[['country']].copy()
-        df_results['IF_anomaly'] = (if_pred == -1).astype(int)
-        df_results['IF_score'] = if_score
-        df_results['LOF_anomaly'] = (lof_pred == -1).astype(int)
-        df_results['LOF_score'] = lof_score
-        df_results['SVM_anomaly'] = (svm_pred == -1).astype(int)
-        df_results['SVM_score'] = svm_score
-        df_results['Composite_anomaly'] = comp_flag
-        df_results['Composite_score'] = comp_score
-
-        # ------------------------------------------------------------
-        # Global visual overview (KPI metrics remain)
-        # ------------------------------------------------------------
-        st.markdown("---")
-        st.header("📈 Global Overview")
-
-        kpi1, kpi2, kpi3, kpi4 = st.columns(4)
-        kpi1.metric("🌲 IF anomalies", df_results['IF_anomaly'].sum(), f"{df_results['IF_anomaly'].mean():.1%}")
-        kpi2.metric("📍 LOF anomalies", df_results['LOF_anomaly'].sum(), f"{df_results['LOF_anomaly'].mean():.1%}")
-        kpi3.metric("🧲 OCSVM anomalies", df_results['SVM_anomaly'].sum(), f"{df_results['SVM_anomaly'].mean():.1%}")
-        kpi4.metric("🎯 Composite anomalies", df_results['Composite_anomaly'].sum(), f"{df_results['Composite_anomaly'].mean():.1%}")
-
-        col_plot1, col_plot2 = st.columns(2)
-        with col_plot1:
-            top_n = st.slider("Show top N anomalous countries (bar chart)", 5, 30, 15, key="top_n_bar")
-            top_countries = df_results.nlargest(top_n, 'Composite_score')
-            fig_bar = px.bar(top_countries, x='Composite_score', y='country', orientation='h',
-                             color='Composite_score', color_continuous_scale='Reds_r',
-                             title=f"Top {top_n} Countries by Composite Anomaly Score")
-            fig_bar.update_layout(height=500, margin=dict(l=100), showlegend=False)
-            st.plotly_chart(fig_bar, use_container_width=True)
-
-        with col_plot2:
-            if len(feature_cols) >= 2:
-                fig_scatter = px.scatter(x=X_scaled[:,0], y=X_scaled[:,1],
-                                         color=df_results['Composite_score'],
-                                         size=df_results['Composite_anomaly']*30 + 20,
-                                         hover_name=df_results['country'],
-                                         color_continuous_scale='RdYlGn_r',
-                                         title="Feature Space (first two components) · Red = higher risk")
-                fig_scatter.update_layout(height=500)
-                st.plotly_chart(fig_scatter, use_container_width=True)
-            else:
-                st.info("Need at least two features to display the scatter plot.")
-
-        # ------------------------------------------------------------
-        # Tabbed detailed results with per-model graphs (Top 7 / All toggle)
-        # ------------------------------------------------------------
-        st.markdown("---")
-        st.header("🔍 Detailed Model Results")
-
-        tab_if, tab_lof, tab_svm, tab_comp, tab_heat = st.tabs([
-            "🌲 Isolation Forest", "📍 Local Outlier Factor", "🧲 One‑Class SVM", "🎯 Composite", "🔥 Flag Heatmap"
-        ])
-
-        # Helper to create a toggleable bar chart for a given model
-        def make_model_graph(df, score_col, country_col, anomaly_flag_col, model_name, color_scale):
-            """Display a bar chart with toggle between Top 7 and All countries."""
-            # Prepare data: only anomalous countries sorted by score descending
-            df_anom = df[df[anomaly_flag_col] == 1].copy()
-            if df_anom.empty:
-                st.info(f"No anomalies flagged by {model_name} with current settings.")
-                return
-            df_anom = df_anom.sort_values(score_col, ascending=False)
-            
-            # Toggle
-            view_mode = st.radio(
-                f"Show graph for {model_name}",
-                options=["Top 7 Anomalies", "All Anomalies"],
-                horizontal=True,
-                key=f"toggle_{model_name}"
-            )
-            if view_mode == "Top 7 Anomalies":
-                df_plot = df_anom.head(7)
-                title = f"Top 7 Anomalous Countries – {model_name}"
-            else:
-                df_plot = df_anom
-                title = f"All Anomalous Countries – {model_name} (n={len(df_anom)})"
-            
-            fig = px.bar(df_plot, x=score_col, y=country_col, orientation='h',
-                         color=score_col, color_continuous_scale=color_scale,
-                         title=title)
-            fig.update_layout(height=max(400, len(df_plot)*30), margin=dict(l=100))
-            st.plotly_chart(fig, use_container_width=True)
-            
-            st.markdown('<div class="ml-divider"></div>', unsafe_allow_html=True)
-
         # ══════════════════════════════════════════════════════════════════════
-        # §3 — TEMPORAL ANOMALY DETECTION
-        # ══════════════════════════════════════════════════════════════════════
+    # §3 — TEMPORAL ANOMALY DETECTION
+    # ══════════════════════════════════════════════════════════════════════
     st.markdown(
         sec_html(3, "Temporal Anomaly Detection",
                  "Country-year supply disruptions across 7 time-series methods"),
         unsafe_allow_html=True,
     )
+
+# Load all temporal data with fallbacks + standardization
+    ewma_raw = helpers.safe_get_data(data, "anomaly_ewma")
+    ewma = helpers.standardize_flags(ewma_raw, ['ewma_anomaly_flag', 'shock_flag'])
+    if ewma is not None:
+        st.success(f"✅ EWMA standardized: {ewma.shape} | anomalies: {(ewma.filter(like='_std')==1).sum().sum()}")
+    
+    iqr_df = helpers.safe_get_data(data, "anomaly_iqr")
+    percentile = helpers.safe_get_data(data, "anomaly_percentile")
+    mov_avg = helpers.safe_get_data(data, "anomaly_moving_avg_robust")
+    prophet = helpers.safe_get_data(data, "anomaly_prophet")
+    if prophet is None:
+        prophet = helpers.safe_get_data(data, "prophet_anomalies")
+    lstm = helpers.safe_get_data(data, "anomaly_lstm")
+    combined_yr = helpers.safe_get_data(data, "combined_yearly_anomalies")
+    adash = helpers.safe_get_data(data, "anomaly_dashboard")
+    yearly_composite = helpers.safe_get_data(data, "yearly_composite")
+
+    # Initialize counts
+    ewma_n = anomaly_flag_count(ewma, "ewma_anomaly_flag", "shock_flag", "anomaly", "flag")
+    prop_n = anomaly_flag_count(prophet, "prophet_anomaly_flag", "anomaly", "is_anomaly", "flag")
+    lstm_n = anomaly_flag_count(lstm, "lstm_anomaly_flag", "anomaly", "is_anomaly")
 
     t_ewma, t_iqr, t_pct, t_ma, t_prop, t_lstm, t_comb = st.tabs([
         "📈 EWMA", "📦 IQR", "📉 Percentile",
@@ -868,55 +728,109 @@ def render(data: dict, df_sev, filters):
             f"<strong>{ewma_n or '—'}</strong> country-year divergence points — most effective for capturing short-duration infrastructure shocks.",
         ), unsafe_allow_html=True)
 
-        # FIX-6: re-fetch if variable is still None
+        # 🐛 EWMA DEBUG EXPANDER (TEMP - can collapse after confirmation)
+        with st.expander("🐛 EWMA DEBUG", expanded=False):
+            st.write(f"**ewma object**: {type(ewma)}")
+            if ewma is not None:
+                st.write(f"**Shape**: {ewma.shape}")
+                st.write(f"**Empty**: {ewma.empty}")
+                st.write(f"**Columns** ({len(ewma.columns)}): ```{list(ewma.columns)}```")
+                if len(ewma) > 0:
+                    st.write("**Sample data (top 5 rows)**:")
+                    st.dataframe(ewma[['country', 'year']].head() if 'country' in ewma.columns and 'year' in ewma.columns else ewma.head(), use_container_width=True)
+                    st.write(f"**Unique countries** ({len(ewma['country'].unique())}): ```{sorted(ewma['country'].dropna().unique()[:10])}```")
+                else:
+                    st.error("📭 DataFrame is empty!")
+            else:
+                st.error("❌ safe_get_data returned None")
+        
         if not ok(ewma):
-            ewma = data.get("anomaly_ewma")
-        if not ok(ewma):
-            st.markdown(empty_html("EWMA checkpoint not found."), unsafe_allow_html=True)
+            st.markdown(empty_html("EWMA checkpoint not found. Check debug above!"), unsafe_allow_html=True)
         else:
-            c_col    = fcol(ewma, "country", "Country")
-            yr_col   = fcol(ewma, "year", "Year")
-            flag_col = fcol(ewma, "ewma_anomaly_flag", "shock_flag", "anomaly", "flag")
-
+            c_col = fcol(ewma, "country", "Country")
+            yr_col = fcol(ewma, "year", "Year")
+            flag_col = fcol(ewma, "ewma_anomaly_flag", "shock_flag", "anomaly", "flag", "ewma_flag")
+            
             if flag_col is None:
                 st.error(f"❌ EWMA: no flag column. Available: {ewma.columns.tolist()}")
+                st.info("💡 Expected: ewma_anomaly_flag, shock_flag, anomaly, flag")
             else:
+                # 🐛 DEBUG FLAG VALUES (TEMP - remove after confirmation)
+                st.info(f"🔍 EWMA using flag_col='{flag_col}'")
+                st.info(f"🔍 Flag value_counts(): {ewma[flag_col].value_counts().to_dict()}")
+                st.info(f"🔍 Rows where flag==-1: {(ewma[flag_col] == -1).sum()}")
+                st.info(f"🔍 Rows where flag==1:  {(ewma[flag_col] == 1).sum()}")
+                st.info(f"🔍 Rows where flag==True: {(ewma[flag_col] == True).sum()}")  # noqa
                 supply_col = get_supply_col(ewma)
-                if ewma_n is None:
-                    ewma_n = int((ewma[flag_col] == -1).sum())
-
-                countries   = get_countries(ewma)
+                countries = get_countries(ewma)
                 sel_country = st.selectbox("🔍 Focus on country (EWMA)", ["All"] + countries, key="ewma_c")
-                ewma_view   = ewma[ewma[c_col] == sel_country] if sel_country != "All" and c_col else ewma
-
+                
+                ewma_view = ewma[ewma[c_col] == sel_country] if sel_country != "All" and c_col else ewma.copy()
                 ctrl_s, ctrl_sel, ctrl_top, ctrl_all = country_controls("ewma", get_countries(ewma))
                 df_e = filter_df(ewma_view, ctrl_sel, ctrl_s)
-
-                col1, col2 = st.columns([3, 2])
-                with col1:
-                    if supply_col and yr_col:
-                        fig_ts = plot_ts_anomalies(df_e, yr_col, supply_col, flag_col,
-                                                   f"<b>EWMA: {sel_country}</b>", TEAL)
-                        if fig_ts:
-                            st.plotly_chart(fig_ts, use_container_width=True)
-                    if yr_col:
-                        yr_agg = (df_e[flag_col] == -1).groupby(df_e[yr_col]).sum().reset_index()
-                        yr_agg.columns = ["year", "anomalies"]
-                        fig_bar = go.Figure(go.Bar(x=yr_agg["year"], y=yr_agg["anomalies"],
-                                                   marker_color=TEAL))
-                        fig_bar.update_layout(title="<b>Anomalies per Year</b>", height=250, **T)
-                        st.plotly_chart(fig_bar, use_container_width=True)
-                with col2:
-                    if c_col:
-                        top_e = (
-                            df_e[df_e[flag_col] == -1]
-                            .groupby(c_col).size()
-                            .sort_values(ascending=False)
-                            .head(ctrl_top if not ctrl_all else 9999)
-                            .reset_index(name="Anomaly Years")
-                        )
-                        st.dataframe(top_e.rename(columns={c_col: "Country"}),
-                                     use_container_width=True, hide_index=True)
+                
+                if not df_e.empty:
+                    col1, col2 = st.columns([3, 2])
+                    with col1:
+                        if supply_col and yr_col and flag_col:
+                            fig_ts = plot_ts_anomalies(df_e, yr_col, supply_col, flag_col,
+                                                       f"<b>EWMA: {sel_country if sel_country != 'All' else 'All Countries'}</b>", TEAL)
+                            if fig_ts:
+                                st.plotly_chart(fig_ts, use_container_width=True)
+                        
+                        if yr_col and flag_col and flag_col in df_e.columns:
+                            # Use the same flag logic as table (1 instead of -1)
+                            anomaly_mask = (df_e[flag_col] == 1)
+                            yr_agg = anomaly_mask.groupby(df_e[yr_col]).sum().reset_index()
+                            yr_agg.columns = ["year", "anomalies"]
+                            if not yr_agg.empty and yr_agg["anomalies"].sum() > 0:
+                                fig_bar = go.Figure(go.Bar(x=yr_agg["year"], y=yr_agg["anomalies"],
+                                                           marker_color=TEAL))
+                                fig_bar.update_layout(title="<b>Anomalies per Year</b>", height=250, **T)
+                                st.plotly_chart(fig_bar, use_container_width=True)
+                            else:
+                                st.info("📊 No anomalies for yearly aggregation")
+                    
+                    with col2:
+                        if c_col and flag_col and flag_col in df_e.columns:
+                            # 🐛 Try multiple anomaly flag conventions
+                            # 🐛 Try multiple anomaly flag conventions (0/1 flags common)
+                            if flag_col in df_e.columns:
+                                anomalies_df_v1 = df_e[df_e[flag_col] == -1]
+                                anomalies_df_v2 = df_e[df_e[flag_col] == 1]
+                                anomalies_df_v3 = df_e[df_e[flag_col] == True]  # noqa
+                                
+                                if not anomalies_df_v1.empty:
+                                    anomalies_df = anomalies_df_v1
+                                elif not anomalies_df_v2.empty:
+                                    anomalies_df = anomalies_df_v2
+                                    st.success(f"✅ Using flag==1 convention ({len(anomalies_df_v2)} rows)")
+                                elif not anomalies_df_v3.empty:
+                                    anomalies_df = anomalies_df_v3
+                                    st.success(f"✅ Using flag==True convention ({len(anomalies_df_v3)} rows)")
+                                else:
+                                    st.warning(f"No rows where {flag_col} in [-1,1,True] ({len(df_e)} total filtered)")
+                                    # Fallback: show top normalized_deviation scores
+                                    dev_col = fcol(df_e, "normalized_deviation", "abs_deviation", "shock_intensity")
+                                    if dev_col:
+                                        top_e = df_e.nlargest(ctrl_top if not ctrl_all else len(df_e), dev_col)
+                                        st.info(f"📊 Fallback: Top {dev_col} scores (no flag matches)")
+                                        st.dataframe(top_e[[c_col, yr_col, flag_col, dev_col]].head(),
+                                                   use_container_width=True, hide_index=True)
+                                    else:
+                                        st.dataframe(df_e[[c_col, yr_col, flag_col]].head(20),
+                                                   use_container_width=True, hide_index=True)
+                                    return  # exit early
+                            else:
+                                st.warning("No valid flag_col")
+                                return
+                                
+                            top_e = (anomalies_df.groupby(c_col).size()
+                                    .sort_values(ascending=False)
+                                    .head(ctrl_top if not ctrl_all else 9999)
+                                    .reset_index(name="Anomaly Years"))
+                            st.dataframe(top_e.rename(columns={c_col: "Country"}),
+                                        use_container_width=True, hide_index=True)
 
     # ── IQR ──────────────────────────────────────────────────────────────
     with t_iqr:
@@ -931,52 +845,53 @@ def render(data: dict, df_sev, filters):
             "rose",
         ), unsafe_allow_html=True)
 
-        # FIX-8: re-fetch and apply country filter before column access
         if not ok(iqr_df):
-            iqr_df = data.get("anomaly_iqr")
-        if not ok(iqr_df):
-            st.markdown(empty_html(), unsafe_allow_html=True)
+            st.markdown(empty_html("IQR checkpoint not found."), unsafe_allow_html=True)
         else:
-            c_col      = fcol(iqr_df, "country", "Country")
-            yr_col     = fcol(iqr_df, "year", "Year")
-            score_col  = fcol(iqr_df, "iqr_anomaly_score", "anomaly_score", "score")
+            c_col = fcol(iqr_df, "country", "Country")
+            yr_col = fcol(iqr_df, "year", "Year")
+            score_col = fcol(iqr_df, "iqr_anomaly_score", "anomaly_score", "score")
             supply_col = get_supply_col(iqr_df)
-
-            countries   = get_countries(iqr_df)
+            
+            countries = get_countries(iqr_df)
             sel_country = st.selectbox("🔍 Focus on country (IQR)", ["All"] + countries, key="iqr_c")
-            iqr_view    = iqr_df[iqr_df[c_col] == sel_country] if sel_country != "All" and c_col else iqr_df
-
+            iqr_view = iqr_df[iqr_df[c_col] == sel_country] if sel_country != "All" and c_col else iqr_df.copy()
+            
             ctrl_s, ctrl_sel, ctrl_top, ctrl_all = country_controls("iqr", get_countries(iqr_view))
             df_iq = filter_df(iqr_view, ctrl_sel, ctrl_s)
-
-            col1, col2 = st.columns([3, 2])
-            with col1:
-                if supply_col and yr_col:
-                    fig_scatter = px.scatter(
-                        df_iq, x=yr_col, y=supply_col,
-                        color=score_col if score_col else None,
-                        color_continuous_scale="Viridis",
-                        title="<b>IQR: Supply with anomaly score</b>",
-                    )
-                    fig_scatter.update_layout(height=350, **T)
-                    st.plotly_chart(fig_scatter, use_container_width=True)
-                elif score_col and c_col:
-                    top_iq = df_iq.nlargest(ctrl_top if not ctrl_all else len(df_iq), score_col)
-                    fig = px.scatter(
-                        top_iq, x=yr_col or top_iq.index, y=score_col,
-                        color=c_col, size=score_col, size_max=14,
-                        title="<b>IQR Anomaly Scores</b>",
-                    )
-                    fig.update_layout(height=320, **T)
-                    st.plotly_chart(fig, use_container_width=True)
-            with col2:
-                if score_col and c_col:
-                    top_iq = df_iq.nlargest(ctrl_top if not ctrl_all else len(df_iq), score_col)
-                    st.dataframe(
-                        top_iq[[c_col, score_col]].rename(
-                            columns={c_col: "Country", score_col: "IQR Score"}),
-                        use_container_width=True, hide_index=True,
-                    )
+            
+            if not df_iq.empty:
+                col1, col2 = st.columns([3, 2])
+                with col1:
+                    if supply_col and yr_col:
+                        fig_scatter = px.scatter(
+                            df_iq, x=yr_col, y=supply_col,
+                            color=score_col if score_col else None,
+                            color_continuous_scale="Viridis",
+                            title="<b>IQR: Supply with anomaly score</b>",
+                        )
+                        fig_scatter.update_layout(height=350, **T)
+                        st.plotly_chart(fig_scatter, use_container_width=True)
+                    elif score_col and c_col and score_col in df_iq.columns:
+                        top_iq = df_iq.nlargest(ctrl_top if not ctrl_all else len(df_iq), score_col)
+                        if not top_iq.empty:
+                            fig = px.scatter(
+                                top_iq, x=yr_col or top_iq.index, y=score_col,
+                                color=c_col, size=score_col, size_max=14,
+                                title="<b>IQR Anomaly Scores</b>",
+                            )
+                            fig.update_layout(height=320, **T)
+                            st.plotly_chart(fig, use_container_width=True)
+                
+                with col2:
+                    if score_col and c_col and score_col in df_iq.columns:
+                        top_iq = df_iq.nlargest(ctrl_top if not ctrl_all else len(df_iq), score_col)
+                        if not top_iq.empty:
+                            st.dataframe(
+                                top_iq[[c_col, score_col]].rename(
+                                    columns={c_col: "Country", score_col: "IQR Score"}),
+                                use_container_width=True, hide_index=True,
+                            )
 
     # ── Percentile ────────────────────────────────────────────────────────
     with t_pct:
@@ -993,43 +908,45 @@ def render(data: dict, df_sev, filters):
         ), unsafe_allow_html=True)
 
         if not ok(percentile):
-            percentile = data.get("anomaly_percentile")
-        if not ok(percentile):
-            st.markdown(empty_html(), unsafe_allow_html=True)
+            st.markdown(empty_html("Percentile checkpoint not found."), unsafe_allow_html=True)
         else:
-            c_col      = fcol(percentile, "country", "Country")
-            yr_col     = fcol(percentile, "year", "Year")
-            sev_col    = fcol(percentile, "anomaly_severity", "severity")
-            score_col  = fcol(percentile, "pct_anomaly_score", "score")
+            c_col = fcol(percentile, "country", "Country")
+            yr_col = fcol(percentile, "year", "Year")
+            sev_col = fcol(percentile, "anomaly_severity", "severity")
+            score_col = fcol(percentile, "pct_anomaly_score", "score")
             supply_col = get_supply_col(percentile)
-
-            countries   = get_countries(percentile)
+            
+            countries = get_countries(percentile)
             sel_country = st.selectbox("🔍 Focus on country (Percentile)", ["All"] + countries, key="pct_c")
-            pct_view    = percentile[percentile[c_col] == sel_country] if sel_country != "All" and c_col else percentile
-
+            pct_view = percentile[percentile[c_col] == sel_country] if sel_country != "All" and c_col else percentile.copy()
+            
             ctrl_s, ctrl_sel, ctrl_top, ctrl_all = country_controls("pct", get_countries(pct_view))
             df_p = filter_df(pct_view, ctrl_sel, ctrl_s)
-
-            col1, col2 = st.columns([2, 3])
-            with col1:
-                if sev_col and pd.api.types.is_object_dtype(df_p[sev_col]):
-                    vc  = df_p[sev_col].value_counts()
-                    fig = px.pie(values=vc.values, names=vc.index, hole=0.55,
-                                 color_discrete_sequence=ACCENT_SEQ,
-                                 title="<b>Severity Distribution</b>")
-                    fig.update_layout(height=280, **T)
-                    st.plotly_chart(fig, use_container_width=True)
-                elif supply_col and yr_col:
-                    fig_line = px.line(df_p, x=yr_col, y=supply_col,
-                                       color=c_col if c_col else None,
-                                       title="<b>Supply Time Series (Percentile)</b>")
-                    fig_line.update_layout(height=280, **T)
-                    st.plotly_chart(fig_line, use_container_width=True)
-            with col2:
-                if c_col and score_col:
-                    top_p    = df_p.nlargest(ctrl_top if not ctrl_all else len(df_p), score_col)
-                    show_c   = [x for x in [c_col, yr_col, sev_col, score_col] if x]
-                    st.dataframe(top_p[show_c], use_container_width=True, hide_index=True)
+            
+            if not df_p.empty:
+                col1, col2 = st.columns([2, 3])
+                with col1:
+                    if sev_col and sev_col in df_p.columns and pd.api.types.is_object_dtype(df_p[sev_col]):
+                        vc = df_p[sev_col].value_counts()
+                        if not vc.empty:
+                            fig = px.pie(values=vc.values, names=vc.index, hole=0.55,
+                                       color_discrete_sequence=ACCENT_SEQ,
+                                       title="<b>Severity Distribution</b>")
+                            fig.update_layout(height=280, **T)
+                            st.plotly_chart(fig, use_container_width=True)
+                    elif supply_col and yr_col:
+                        fig_line = px.line(df_p, x=yr_col, y=supply_col,
+                                         color=c_col if c_col else None,
+                                         title="<b>Supply Time Series (Percentile)</b>")
+                        fig_line.update_layout(height=280, **T)
+                        st.plotly_chart(fig_line, use_container_width=True)
+                
+                with col2:
+                    if c_col and score_col and score_col in df_p.columns:
+                        top_p = df_p.nlargest(ctrl_top if not ctrl_all else len(df_p), score_col)
+                        if not top_p.empty:
+                            show_c = [x for x in [c_col, yr_col, sev_col, score_col] if x and x in top_p.columns]
+                            st.dataframe(top_p[show_c], use_container_width=True, hide_index=True)
 
     # ── Moving Avg Robust ─────────────────────────────────────────────────
     with t_ma:
@@ -1048,64 +965,66 @@ def render(data: dict, df_sev, filters):
         ), unsafe_allow_html=True)
 
         if not ok(mov_avg):
-            mov_avg = data.get("anomaly_moving_avg_robust")
-        if not ok(mov_avg):
-            st.markdown(empty_html(), unsafe_allow_html=True)
+            st.markdown(empty_html("Moving Average checkpoint not found."), unsafe_allow_html=True)
         else:
-            c_col      = fcol(mov_avg, "country", "Country")
-            yr_col     = fcol(mov_avg, "year", "Year")
-            sev_col    = fcol(mov_avg, "ma_severity", "severity", "anomaly_severity")
-            dir_col    = fcol(mov_avg, "anomaly_direction", "direction")
+            c_col = fcol(mov_avg, "country", "Country")
+            yr_col = fcol(mov_avg, "year", "Year")
+            sev_col = fcol(mov_avg, "ma_severity", "severity", "anomaly_severity")
+            dir_col = fcol(mov_avg, "anomaly_direction", "direction")
             supply_col = get_supply_col(mov_avg)
-
-            countries   = get_countries(mov_avg)
+            
+            countries = get_countries(mov_avg)
             sel_country = st.selectbox("🔍 Focus on country (Moving Avg)", ["All"] + countries, key="ma_c")
-            ma_view     = mov_avg[mov_avg[c_col] == sel_country] if sel_country != "All" and c_col else mov_avg
-
+            ma_view = mov_avg[mov_avg[c_col] == sel_country] if sel_country != "All" and c_col else mov_avg.copy()
+            
             ctrl_s, ctrl_sel, ctrl_top, ctrl_all = country_controls("ma", get_countries(ma_view))
             df_ma = filter_df(ma_view, ctrl_sel, ctrl_s)
-
-            col1, col2 = st.columns(2)
-            with col1:
-                if sev_col:
-                    fig = px.pie(df_ma, names=sev_col, hole=0.55,
-                                 color_discrete_sequence=ACCENT_SEQ,
-                                 title="<b>Severity Distribution</b>")
-                    fig.update_layout(height=280, **T)
-                    st.plotly_chart(fig, use_container_width=True)
-            with col2:
-                if dir_col:
-                    unique_dirs = df_ma[dir_col].dropna().unique()
-                    color_map   = {d: TEAL if "pos" in str(d).lower() else ROSE for d in unique_dirs}
-                    color_map["neutral"] = SLATE
-                    fig = px.pie(
-                        df_ma[df_ma[dir_col].notna()], names=dir_col, hole=0.55,
-                        color=dir_col, color_discrete_map=color_map,
-                        title="<b>Shock Direction</b>",
-                    )
-                    fig.update_layout(height=280, **T)
-                    st.plotly_chart(fig, use_container_width=True)
-
-            if supply_col and yr_col and sev_col:
-                fig_ts = px.scatter(df_ma, x=yr_col, y=supply_col, color=sev_col,
-                                    color_discrete_sequence=ACCENT_SEQ,
-                                    title="<b>Moving Avg: Supply with Severity</b>")
-                fig_ts.update_layout(height=350, **T)
-                st.plotly_chart(fig_ts, use_container_width=True)
-
-            # FIX-7: handle both string and numeric severity columns safely
-            if c_col and sev_col and sev_col in df_ma.columns:
-                sev_series = df_ma[sev_col]
-                if pd.api.types.is_object_dtype(sev_series):
-                    high_mask = sev_series.str.lower().isin(["high", "extreme"])
-                else:
-                    num_sev   = pd.to_numeric(sev_series, errors="coerce")
-                    threshold = num_sev.quantile(0.75) if num_sev.notna().any() else 0
-                    high_mask = num_sev >= threshold
-
-                top_ma = df_ma[high_mask] if ctrl_all else df_ma[high_mask].head(ctrl_top)
-                show_c = [x for x in [c_col, yr_col, sev_col, dir_col] if x]
-                st.dataframe(top_ma[show_c], use_container_width=True, hide_index=True)
+            
+            if not df_ma.empty:
+                col1, col2 = st.columns(2)
+                with col1:
+                    if sev_col and sev_col in df_ma.columns:
+                        severity_counts = df_ma[sev_col].value_counts()
+                        if not severity_counts.empty:
+                            fig = px.pie(values=severity_counts.values, names=severity_counts.index, 
+                                       hole=0.55, color_discrete_sequence=ACCENT_SEQ,
+                                       title="<b>Severity Distribution</b>")
+                            fig.update_layout(height=280, **T)
+                            st.plotly_chart(fig, use_container_width=True)
+                
+                with col2:
+                    if dir_col and dir_col in df_ma.columns:
+                        dir_data = df_ma[df_ma[dir_col].notna()]
+                        if not dir_data.empty:
+                            unique_dirs = dir_data[dir_col].unique()
+                            color_map = {d: TEAL if "pos" in str(d).lower() else ROSE for d in unique_dirs}
+                            color_map["neutral"] = SLATE
+                            fig = px.pie(dir_data, names=dir_col, hole=0.55,
+                                       color=dir_col, color_discrete_map=color_map,
+                                       title="<b>Shock Direction</b>")
+                            fig.update_layout(height=280, **T)
+                            st.plotly_chart(fig, use_container_width=True)
+                
+                if supply_col and yr_col and sev_col and sev_col in df_ma.columns:
+                    fig_ts = px.scatter(df_ma, x=yr_col, y=supply_col, color=sev_col,
+                                      color_discrete_sequence=ACCENT_SEQ,
+                                      title="<b>Moving Avg: Supply with Severity</b>")
+                    fig_ts.update_layout(height=350, **T)
+                    st.plotly_chart(fig_ts, use_container_width=True)
+                
+                if c_col and sev_col and sev_col in df_ma.columns:
+                    sev_series = df_ma[sev_col]
+                    if pd.api.types.is_object_dtype(sev_series):
+                        high_mask = sev_series.str.lower().isin(["high", "extreme"])
+                    else:
+                        num_sev = pd.to_numeric(sev_series, errors="coerce")
+                        threshold = num_sev.quantile(0.75) if num_sev.notna().any() else 0
+                        high_mask = num_sev >= threshold
+                    
+                    top_ma = df_ma[high_mask] if ctrl_all else df_ma[high_mask].head(ctrl_top)
+                    if not top_ma.empty:
+                        show_c = [x for x in [c_col, yr_col, sev_col, dir_col] if x and x in top_ma.columns]
+                        st.dataframe(top_ma[show_c], use_container_width=True, hide_index=True)
 
     # ── Prophet ──────────────────────────────────────────────────────────
     with t_prop:
@@ -1122,58 +1041,55 @@ def render(data: dict, df_sev, filters):
             "emerald",
         ), unsafe_allow_html=True)
 
-        # FIX-6: re-fetch if variable is still None
-        if not ok(prophet):
-            prophet = data.get("anomaly_prophet") or data.get("prophet_anomalies")
         if not ok(prophet):
             st.markdown(empty_html("Prophet checkpoint not found."), unsafe_allow_html=True)
         else:
-            c_col    = fcol(prophet, "country", "Country")
-            yr_col   = fcol(prophet, "year", "Year")
+            c_col = fcol(prophet, "country", "Country")
+            yr_col = fcol(prophet, "year", "Year")
             flag_col = fcol(prophet, "prophet_anomaly_flag", "anomaly", "is_anomaly", "flag")
-
+            
             if flag_col is None:
                 st.error(f"❌ Prophet: no flag column. Available: {prophet.columns.tolist()}")
             else:
                 supply_col = get_supply_col(prophet)
-                if prop_n is None:
-                    prop_n = int((prophet[flag_col] == -1).sum())
-
-                countries     = get_countries(prophet)
-                sel_country   = st.selectbox("🔍 Focus on country (Prophet)", ["All"] + countries, key="prop_c")
-                prophet_view  = prophet[prophet[c_col] == sel_country] if sel_country != "All" and c_col else prophet
-
+                countries = get_countries(prophet)
+                sel_country = st.selectbox("🔍 Focus on country (Prophet)", ["All"] + countries, key="prop_c")
+                prophet_view = prophet[prophet[c_col] == sel_country] if sel_country != "All" and c_col else prophet.copy()
+                
                 ctrl_s, ctrl_sel, ctrl_top, ctrl_all = country_controls("prop", get_countries(prophet))
                 df_pr = filter_df(prophet_view, ctrl_sel, ctrl_s)
-
-                col1, col2 = st.columns([3, 2])
-                with col1:
-                    if supply_col and yr_col:
-                        fig_ts = plot_ts_anomalies(
-                            df_pr, yr_col, supply_col, flag_col,
-                            f"<b>Prophet: {sel_country}</b>", EMERALD,
-                        )
-                        if fig_ts:
-                            st.plotly_chart(fig_ts, use_container_width=True)
-                    if yr_col:
-                        yr_pr = (df_pr[flag_col] == -1).groupby(df_pr[yr_col]).sum().reset_index()
-                        yr_pr.columns = ["year", "anomalies"]
-                        fig   = px.bar(yr_pr, x="year", y="anomalies", color="anomalies",
-                                       color_continuous_scale=[[0,"#0d2a20"],[1,"#34d399"]],
-                                       title="<b>Prophet Anomalies per Year</b>")
-                        fig.update_layout(height=250, **T, coloraxis_showscale=False)
-                        st.plotly_chart(fig, use_container_width=True)
-                with col2:
-                    if c_col:
-                        pa = df_pr[df_pr[flag_col] == -1]
-                        top_pr = (
-                            pa.groupby(c_col).size()
-                            .sort_values(ascending=False)
-                            .head(ctrl_top if not ctrl_all else 9999)
-                            .reset_index(name="Flagged Years")
-                        )
-                        st.dataframe(top_pr.rename(columns={c_col: "Country"}),
-                                     use_container_width=True, hide_index=True)
+                
+                if not df_pr.empty:
+                    col1, col2 = st.columns([3, 2])
+                    with col1:
+                        if supply_col and yr_col and flag_col:
+                            fig_ts = plot_ts_anomalies(
+                                df_pr, yr_col, supply_col, flag_col,
+                                f"<b>Prophet: {sel_country if sel_country != 'All' else 'All Countries'}</b>", EMERALD,
+                            )
+                            if fig_ts:
+                                st.plotly_chart(fig_ts, use_container_width=True)
+                        
+                        if yr_col and flag_col and flag_col in df_pr.columns:
+                            yr_pr = (df_pr[flag_col] == -1).groupby(df_pr[yr_col]).sum().reset_index()
+                            yr_pr.columns = ["year", "anomalies"]
+                            if not yr_pr.empty:
+                                fig = px.bar(yr_pr, x="year", y="anomalies", color="anomalies",
+                                           color_continuous_scale=[[0,"#0d2a20"],[1,"#34d399"]],
+                                           title="<b>Prophet Anomalies per Year</b>")
+                                fig.update_layout(height=250, **T, coloraxis_showscale=False)
+                                st.plotly_chart(fig, use_container_width=True)
+                    
+                    with col2:
+                        if c_col and flag_col and flag_col in df_pr.columns:
+                            anomalies = df_pr[df_pr[flag_col] == -1]
+                            if not anomalies.empty:
+                                top_pr = (anomalies.groupby(c_col).size()
+                                        .sort_values(ascending=False)
+                                        .head(ctrl_top if not ctrl_all else 9999)
+                                        .reset_index(name="Flagged Years"))
+                                st.dataframe(top_pr.rename(columns={c_col: "Country"}),
+                                           use_container_width=True, hide_index=True)
 
     # ── LSTM ─────────────────────────────────────────────────────────────
     with t_lstm:
@@ -1191,59 +1107,60 @@ def render(data: dict, df_sev, filters):
         ), unsafe_allow_html=True)
 
         if not ok(lstm):
-            lstm = data.get("anomaly_lstm")
-        if not ok(lstm):
-            st.markdown(empty_html(), unsafe_allow_html=True)
+            st.markdown(empty_html("LSTM checkpoint not found."), unsafe_allow_html=True)
         else:
-            c_col      = fcol(lstm, "country", "Country")
-            yr_col     = fcol(lstm, "year", "Year")
-            flag_col   = fcol(lstm, "lstm_anomaly_flag", "anomaly", "is_anomaly")
-            err_col    = fcol(lstm, "reconstruction_error", "lstm_error", "error")
+            c_col = fcol(lstm, "country", "Country")
+            yr_col = fcol(lstm, "year", "Year")
+            flag_col = fcol(lstm, "lstm_anomaly_flag", "anomaly", "is_anomaly")
+            err_col = fcol(lstm, "reconstruction_error", "lstm_error", "error")
             supply_col = get_supply_col(lstm)
-
-            countries   = get_countries(lstm)
+            
+            countries = get_countries(lstm)
             sel_country = st.selectbox("🔍 Focus on country (LSTM)", ["All"] + countries, key="lstm_c")
-            lstm_view   = lstm[lstm[c_col] == sel_country] if sel_country != "All" and c_col else lstm
-
+            lstm_view = lstm[lstm[c_col] == sel_country] if sel_country != "All" and c_col else lstm.copy()
+            
             ctrl_s, ctrl_sel, ctrl_top, ctrl_all = country_controls("lstm", get_countries(lstm))
             df_lm = filter_df(lstm_view, ctrl_sel, ctrl_s)
-
-            col1, col2 = st.columns([2, 1])
-            with col1:
-                if supply_col and yr_col and flag_col:
-                    fig_ts = plot_ts_anomalies(df_lm, yr_col, supply_col, flag_col,
-                                               "<b>LSTM: Supply & Anomalies</b>", ROSE)
-                    if fig_ts:
-                        st.plotly_chart(fig_ts, use_container_width=True)
-                if err_col:
-                    fig_hist = go.Figure()
-                    if flag_col and flag_col in df_lm.columns:
-                        for label, color, val in [("Normal", TEAL, 1), ("Anomaly", ROSE, -1)]:
-                            mask = df_lm[flag_col] == val
-                            fig_hist.add_trace(go.Histogram(
-                                x=df_lm.loc[mask, err_col],
-                                name=label, marker_color=color, opacity=0.75, nbinsx=50,
-                            ))
-                    else:
-                        fig_hist.add_trace(go.Histogram(x=df_lm[err_col],
-                                                        marker_color=TEAL, nbinsx=50))
-                    fig_hist.update_layout(
-                        title="<b>Reconstruction Error Distribution</b>",
-                        barmode="overlay", height=280, **T,
-                        xaxis_title="Error", yaxis_title="Count",
-                    )
-                    st.plotly_chart(fig_hist, use_container_width=True)
-            with col2:
-                if flag_col and c_col and flag_col in df_lm.columns:
-                    al = df_lm[df_lm[flag_col] == -1]
-                    top_lm = (
-                        al.groupby(c_col).size()
-                        .sort_values(ascending=False)
-                        .head(ctrl_top if not ctrl_all else 9999)
-                        .reset_index(name="Flagged Years")
-                    )
-                    st.dataframe(top_lm.rename(columns={c_col: "Country"}),
-                                 use_container_width=True, hide_index=True)
+            
+            if not df_lm.empty:
+                col1, col2 = st.columns([2, 1])
+                with col1:
+                    if supply_col and yr_col and flag_col and flag_col in df_lm.columns:
+                        fig_ts = plot_ts_anomalies(df_lm, yr_col, supply_col, flag_col,
+                                                  "<b>LSTM: Supply & Anomalies</b>", ROSE)
+                        if fig_ts:
+                            st.plotly_chart(fig_ts, use_container_width=True)
+                    
+                    if err_col and err_col in df_lm.columns:
+                        fig_hist = go.Figure()
+                        if flag_col and flag_col in df_lm.columns:
+                            for label, color, val in [("Normal", TEAL, 1), ("Anomaly", ROSE, -1)]:
+                                mask = df_lm[flag_col] == val
+                                if mask.any():
+                                    fig_hist.add_trace(go.Histogram(
+                                        x=df_lm.loc[mask, err_col],
+                                        name=label, marker_color=color, opacity=0.75, nbinsx=50,
+                                    ))
+                        else:
+                            fig_hist.add_trace(go.Histogram(x=df_lm[err_col],
+                                                            marker_color=TEAL, nbinsx=50))
+                        fig_hist.update_layout(
+                            title="<b>Reconstruction Error Distribution</b>",
+                            barmode="overlay", height=280, **T,
+                            xaxis_title="Error", yaxis_title="Count",
+                        )
+                        st.plotly_chart(fig_hist, use_container_width=True)
+                
+                with col2:
+                    if flag_col and c_col and flag_col in df_lm.columns:
+                        anomalies = df_lm[df_lm[flag_col] == -1]
+                        if not anomalies.empty:
+                            top_lm = (anomalies.groupby(c_col).size()
+                                    .sort_values(ascending=False)
+                                    .head(ctrl_top if not ctrl_all else 9999)
+                                    .reset_index(name="Flagged Years"))
+                            st.dataframe(top_lm.rename(columns={c_col: "Country"}),
+                                       use_container_width=True, hide_index=True)
 
     # ── Combined Yearly ───────────────────────────────────────────────────
     with t_comb:
@@ -1259,70 +1176,99 @@ def render(data: dict, df_sev, filters):
             "amber",
         ), unsafe_allow_html=True)
 
-        src = next((df for df in [combined_yr, adash, data.get("yearly_composite")] if ok(df)), None)
+        # Try multiple sources for combined data
+        src = None
+        for candidate in [combined_yr, adash, yearly_composite, helpers.safe_get_data(data, "yearly_composite")]:
+            if ok(candidate):
+                src = candidate
+                break
+        
         if not ok(src):
-            st.error("🚨 **Combined Yearly Data Missing**\\n\\n"
-                    "Required checkpoints not found:\\n"
-                    f"• `combined_yearly_anomalies`: {'✅' if ok(combined_yr) else '❌ Missing'}\\n"
-                    f"• `anomaly_dashboard`: {'✅' if ok(adash) else '❌ Missing'}\\n"
-                    f"• `yearly_composite`: {'✅' if ok(data.get('yearly_composite')) else '❌ Missing'}\\n\\n"
+            st.error("🚨 **Combined Yearly Data Missing**\n\n"
+                    "Required checkpoints not found:\n"
+                    f"• `combined_yearly_anomalies`: {'✅' if ok(combined_yr) else '❌ Missing'}\n"
+                    f"• `anomaly_dashboard`: {'✅' if ok(adash) else '❌ Missing'}\n"
+                    f"• `yearly_composite`: {'✅' if ok(yearly_composite) else '❌ Missing'}\n\n"
                     "**Fix:** Run `python pipeline.py --full --ml` to regenerate ML checkpoints.")
             st.markdown(empty_html("Combined yearly anomaly ledger not found."), unsafe_allow_html=True)
         else:
-            c_col    = fcol(src, "country", "Country")
-            yr_col   = fcol(src, "year", "Year")
+            c_col = fcol(src, "country", "Country")
+            yr_col = fcol(src, "year", "Year")
             risk_col = fcol(
                 src,
                 "composite_yearly_anomaly_score", "composite_score", "risk_score",
                 "total_flags", "anomaly_count", "score", "total_anomalies",
             )
+            
             if risk_col is None:
                 st.error(f"❌ Combined: no risk score column. Available: {src.columns.tolist()}")
             else:
-                flag_cols = [c for c in src.columns
-                             if c.endswith("_flag") and c != "composite_flag"]
-
+                # Find flag columns for heatmap
+                flag_cols = [c for c in src.columns if c.endswith("_flag") and c != "composite_flag"]
+                
+                # Country controls
                 ctrl_s, ctrl_sel, ctrl_top, ctrl_all = country_controls("cy", get_countries(src))
-                df_cy  = filter_df(src, ctrl_sel, ctrl_s)
-                top_cy = df_cy.nlargest(ctrl_top if not ctrl_all else len(df_cy), risk_col)
-
-                col1, col2 = st.columns([3, 2])
-                with col1:
-                    fig = px.scatter(
-                        top_cy, x=yr_col or top_cy.index, y=risk_col,
-                        color=c_col, size=risk_col, size_max=18,
-                        title="<b>Combined Risk Score per Country-Year</b>",
-                        color_discrete_sequence=ACCENT_SEQ,
-                    )
-                    fig.update_layout(height=360, **T)
-                    st.plotly_chart(fig, use_container_width=True)
-
-                    if len(flag_cols) >= 2:
-                        st.markdown("#### 🔥 Method Flag Heatmap — Top 20 Riskiest Countries")
-                        top20      = df_cy.nlargest(20, risk_col)
-                        heat_data  = top20[flag_cols].fillna(0).astype(int)
-                        heat_data.index = (
-                            top20[c_col] + " (" + top20[yr_col].astype(str) + ")"
-                            if c_col and yr_col else top20.index.astype(str)
-                        )
-                        fig_hm = px.imshow(
-                            heat_data.T,
-                            title="Which methods flagged each country‑year?",
-                            color_continuous_scale="Reds", aspect="auto",
-                        )
-                        fig_hm.update_layout(height=400, **T)
-                        st.plotly_chart(fig_hm, use_container_width=True)
-
-                with col2:
-                    show_c = [x for x in [c_col, yr_col, risk_col] if x]
-                    st.dataframe(
-                        top_cy[show_c].rename(columns={
-                            c_col: "Country", yr_col: "Year", risk_col: "Risk Score",
-                        }),
-                        use_container_width=True, hide_index=True,
-                    )
+                df_cy = filter_df(src, ctrl_sel, ctrl_s)
+                
+                if not df_cy.empty and risk_col in df_cy.columns:
+                    # Sort and get top entries
+                    df_cy_sorted = df_cy.sort_values(risk_col, ascending=False)
+                    top_cy = df_cy_sorted if ctrl_all else df_cy_sorted.head(ctrl_top)
+                    
+                    col1, col2 = st.columns([3, 2])
+                    with col1:
+                        # Risk score scatter plot
+                        if yr_col and yr_col in top_cy.columns:
+                            fig = px.scatter(
+                                top_cy, x=yr_col, y=risk_col,
+                                color=c_col if c_col else None, 
+                                size=risk_col, size_max=18,
+                                title="<b>Combined Risk Score per Country-Year</b>",
+                                color_discrete_sequence=ACCENT_SEQ,
+                            )
+                            fig.update_layout(height=360, **T)
+                            st.plotly_chart(fig, use_container_width=True)
+                        
+                        # Heatmap of method flags
+                        if len(flag_cols) >= 2 and c_col and yr_col:
+                            st.markdown("#### 🔥 Method Flag Heatmap — Top 20 Riskiest Countries")
+                            top20 = df_cy_sorted.head(20).copy()
+                            if c_col in top20.columns and yr_col in top20.columns:
+                                heat_data = top20[flag_cols].fillna(0).astype(int)
+                                heat_data.index = top20[c_col] + " (" + top20[yr_col].astype(str) + ")"
+                                if not heat_data.empty:
+                                    fig_hm = px.imshow(
+                                        heat_data.T,
+                                        title="Which methods flagged each country‑year?",
+                                        color_continuous_scale="Reds", aspect="auto",
+                                    )
+                                    fig_hm.update_layout(height=400, **T)
+                                    st.plotly_chart(fig_hm, use_container_width=True)
+                    
+                    with col2:
+                        # Display top risk scores
+                        show_c = [x for x in [c_col, yr_col, risk_col] if x and x in top_cy.columns]
+                        if show_c:
+                            display_df = top_cy[show_c].rename(columns={
+                                c_col: "Country", 
+                                yr_col: "Year", 
+                                risk_col: "Risk Score",
+                            })
+                            st.dataframe(display_df, use_container_width=True, hide_index=True)
+                            
+                            # Show summary statistics
+                            st.markdown("---")
+                            st.markdown("#### 📊 Summary")
+                            flagged_high = (df_cy[risk_col] >= 4).sum() if risk_col in df_cy.columns else 0
+                            flagged_medium = ((df_cy[risk_col] >= 2) & (df_cy[risk_col] < 4)).sum() if risk_col in df_cy.columns else 0
+                            st.metric("High Risk (Score 4+)", flagged_high)
+                            st.metric("Medium Risk (Score 2-3)", flagged_medium)
+                else:
+                    st.warning("No data available after filtering or missing risk score column.")
 
     st.markdown('<div class="ml-divider"></div>', unsafe_allow_html=True)
+
+
 
     # ══════════════════════════════════════════════════════════════════════
     # §4 — RANDOM FOREST

@@ -103,8 +103,26 @@ def load_spark_parquet(name: str) -> pd.DataFrame | None:
                         st.warning(f"Could not read {os.path.basename(f)}: {exc!s:.80}")
                 if dfs:
                     df = pd.concat(dfs, ignore_index=True)
-                    if "country" in df.columns:
+                    
+
+                    # Safer normalize_country - skip if empty or no country col
+                    if df is not None and not df.empty and "country" in df.columns:
+                        pre_shape = df.shape
+                        country_pre_nan = df["country"].isna().sum()
                         df["country"] = df["country"].apply(normalize_country)
+                        country_post_nan = df["country"].isna().sum()
+                        
+                        if name == "anomaly_ewma":
+                            print(f"EWMA normalize: {pre_shape} → {df.shape} | NaN country: {country_pre_nan}→{country_post_nan}")
+                            print(f"EWMA countries sample: {df['country'].dropna().unique()[:5].tolist()}")
+                            print(f"EWMA flag cols: {[c for c in df.columns if any(x in c.lower() for x in ['flag','anomaly','shock'])]}")
+                        elif name in ANOMALY_MODELS:
+                            pass  # silent
+                    else:
+                        if name == "anomaly_ewma":
+                            print(f"EWMA SKIPPED normalize: df={getattr(df,'empty',True)}, country_col={'country' in getattr(df,'columns',[])}")
+
+                    
                     return df
 
         # ── Case 2: single .parquet file ─────────────────────────────────
@@ -144,6 +162,14 @@ def load_text(name: str) -> str | None:
 def load_model_data(name: str) -> pd.DataFrame | None:
     """Load model data with parquet → CSV fallback and automatic CSV export."""
     df       = load_spark_parquet(name)
+    
+
+    # Debug removed - silent production load
+    if name in ANOMALY_MODELS and st._is_running_with_streamlit:
+        # Optional: Only log in debug mode (commented for production)
+        pass
+
+    
     csv_file = os.path.join(CSV_PATH, f"{name}.csv")
 
     # Export to CSV on first successful load

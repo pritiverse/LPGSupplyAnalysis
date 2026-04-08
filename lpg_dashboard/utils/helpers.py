@@ -114,6 +114,50 @@ def get_structural_anomaly_score(df, country):
     return 0
 
 
+def safe_get_data(data: dict | None, key: str, default=None):
+    """Safely get data from dict with ok() check. Returns default if missing/empty."""
+    if data is None:
+        return default
+    val = data.get(key, default)
+    if val is None or (isinstance(val, pd.DataFrame) and (val.empty or len(val) == 0)):
+        return default
+    return val
+
+
+def standardize_flags(df, flag_candidates=None):
+    """Normalize anomaly flags to 1=True across models (flag=-1/1/True → std=1)"""
+    if df is None or df.empty:
+        return df
+    df = df.copy()
+    candidates = flag_candidates or ['anomaly_flag', 'flag', 'shock_flag', 'anomaly']
+    for cand in candidates:
+        if cand in df.columns:
+            col = df[cand]
+            if col.dtype == 'bool':
+                df[f'{cand}_std'] = col.astype(int)
+            elif (col == -1).any():
+                df[f'{cand}_std'] = (col == -1).astype(int)
+            elif (col == 1).any() or col.nunique() <= 2:
+                df[f'{cand}_std'] = (col == 1).astype(int)
+            elif col.nunique() > 2:
+                df[f'{cand}_std'] = (col > col.quantile(0.95)).astype(int)
+            return df
+    return df  # no flags found
+
+
+def detect_anomaly_col(df, candidates=None):
+    """Heuristically find best flag/score column"""
+    if df is None or df.empty:
+        return None
+    candidates = candidates or ['anomaly_flag', 'flag', 'shock_flag', 'anomaly', 'score']
+    for c in candidates:
+        if c in df.columns:
+            return c
+    # Fallback to high-deviation cols
+    score_like = [c for c in df.columns if any(x in c.lower() for x in ['score', 'deviation', 'error'])]
+    return score_like[0] if score_like else None
+
+
 def get_yearly_anomaly_count(df, country, year=None):
     """Get yearly anomaly count for a country"""
     if df is None or df.empty:
