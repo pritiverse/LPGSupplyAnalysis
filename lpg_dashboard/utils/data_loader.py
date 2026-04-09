@@ -165,9 +165,7 @@ def load_model_data(name: str) -> pd.DataFrame | None:
     
 
     # Debug removed - silent production load
-    if name in ANOMALY_MODELS and st._is_running_with_streamlit:
-        # Optional: Only log in debug mode (commented for production)
-        pass
+# Debug logging removed (st._is_running_with_streamlit deprecated)
 
     
     csv_file = os.path.join(CSV_PATH, f"{name}.csv")
