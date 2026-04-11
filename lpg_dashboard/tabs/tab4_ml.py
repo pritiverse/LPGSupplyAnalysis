@@ -72,6 +72,33 @@ def anomaly_flag_count(df, *cols) -> int | None:
     return None
 
 
+def get_anomaly_value(df: pd.DataFrame, flag_col: str | None) -> int | None:
+    if not ok(df) or not flag_col or flag_col not in df.columns:
+        return None
+    v = pd.to_numeric(df[flag_col], errors="coerce").dropna()
+    if v.empty:
+        return None
+
+    flag_name = flag_col.lower()
+    negative_is_anomaly = (
+        "lof" in flag_name or
+        "if_" in flag_name or
+        "isolation" in flag_name or
+        "ocsvm" in flag_name or
+        "svm" in flag_name
+    )
+
+    if negative_is_anomaly and (v == -1).any():
+        return -1
+    if (v == 1).any() and (v == 0).any():
+        return 1
+    if (v == -1).any():
+        return -1
+    if (v == 1).any():
+        return 1
+    return None
+
+
 def get_countries(df) -> list[str]:
     c = fcol(df, "country", "Country", "COUNTRY")
     return sorted(df[c].dropna().unique().tolist()) if c else []
@@ -201,6 +228,7 @@ def show_structural_model(df_model, model_name, score_col, flag_col, color_scale
     if not ok(df_model):
         empty_state(f"{model_name} checkpoint not found.")
         return
+
     ctrl_s, ctrl_sel, ctrl_top, ctrl_all = country_controls(
         model_name.lower().replace(" ", "_"), get_countries(df_model))
     df_f = filter_df(df_model, ctrl_sel, ctrl_s)
@@ -209,41 +237,108 @@ def show_structural_model(df_model, model_name, score_col, flag_col, color_scale
         st.warning(f"No country column in {model_name}.")
         return
 
-    anom_val = 1 if (flag_col and flag_col in df_f.columns and
-                     (df_f[flag_col] == 1).any()) else -1
-    if flag_col and flag_col in df_f.columns:
-        df_anom = df_f[df_f[flag_col] == anom_val]
-    else:
-        df_anom = df_f
+    anom_val = get_anomaly_value(df_f, flag_col)
+    has_flag = bool(flag_col and flag_col in df_f.columns and anom_val is not None)
 
-    if score_col and score_col in df_anom.columns:
-        n = ctrl_top if not ctrl_all else len(df_anom)
-        df_top = df_anom.nlargest(n, score_col)
+    if has_flag:
+        df_anom = df_f[df_f[flag_col] == anom_val].copy()
+        df_norm = df_f[df_f[flag_col] != anom_val].copy()
     else:
-        df_top = df_anom if ctrl_all else df_anom.head(ctrl_top)
+        df_anom = df_f.copy()
+        df_norm = df_f.iloc[0:0].copy()
+
+    if score_col and score_col in df_f.columns:
+        df_rank = df_anom if not df_anom.empty else df_f
+        n = ctrl_top if not ctrl_all else len(df_rank)
+        df_top = df_rank.nlargest(n, score_col)
+    else:
+        df_top = (df_anom if not df_anom.empty else df_f)
+        if not ctrl_all:
+            df_top = df_top.head(ctrl_top)
+
+    c1, c2, c3 = st.columns([1, 1, 1])
+    c1.metric("Countries", len(df_f))
+    c2.metric("Flagged anomalies", len(df_anom) if has_flag else "—")
+    c3.metric("Normal countries", len(df_norm) if has_flag else "—")
 
     col1, col2 = st.columns([3, 2])
     with col1:
-        if score_col and score_col in df_top.columns:
-            fig = px.bar(df_top.sort_values(score_col, ascending=True),
-                         x=score_col, y=c_col, orientation="h",
-                         color=score_col, color_continuous_scale=color_scale,
-                         title=f"<b>{model_name} — Anomaly Scores</b>")
-            fig.update_layout(height=400, **{**T, "margin": dict(l=120)})
-            st.plotly_chart(fig, use_container_width=True)
-        else:
-            if ok(df_anom) and c_col in df_anom.columns:
-                cnt = df_anom[c_col].value_counts().reset_index()
-                cnt.columns = [c_col, "Anomaly Count"]
-                cnt = cnt if ctrl_all else cnt.head(ctrl_top)
-                fig = px.bar(cnt, x="Anomaly Count", y=c_col, orientation="h",
-                             color="Anomaly Count", color_continuous_scale=color_scale,
-                             title=f"<b>{model_name} — Anomaly Count</b>")
-                fig.update_layout(height=400, **T)
+        if score_col and score_col in df_f.columns:
+            score_series = pd.to_numeric(df_f[score_col], errors="coerce")
+            score_df = df_f.loc[score_series.notna(), [c_col, score_col] + ([flag_col] if flag_col in df_f.columns else [])].copy()
+
+            if has_flag and not df_anom.empty:
+                fig = go.Figure()
+                if not df_norm.empty:
+                    fig.add_trace(go.Histogram(
+                        x=df_norm[score_col],
+                        name="Normal",
+                        marker_color=SLATE,
+                        opacity=0.65,
+                        nbinsx=30
+                    ))
+                fig.add_trace(go.Histogram(
+                    x=df_anom[score_col],
+                    name="Anomaly",
+                    marker_color=accent_color,
+                    opacity=0.9,
+                    nbinsx=30
+                ))
+                fig.update_layout(
+                    title=f"<b>{model_name} — Score distribution</b>",
+                    height=320,
+                    barmode="overlay",
+                    xaxis_title="Model score",
+                    yaxis_title="Country count",
+                    **T
+                )
                 st.plotly_chart(fig, use_container_width=True)
+
+                fig2 = px.bar(
+                    df_top.sort_values(score_col, ascending=True),
+                    x=score_col,
+                    y=c_col,
+                    orientation="h",
+                    color=score_col,
+                    color_continuous_scale=color_scale,
+                    title=f"<b>{model_name} — Top anomalous countries</b>"
+                )
+                fig2.update_layout(height=360, **{**T, "margin": dict(l=120, r=8, t=44, b=8)})
+                st.plotly_chart(fig2, use_container_width=True)
+            else:
+                fig = px.bar(
+                    score_df.sort_values(score_col, ascending=False).head(ctrl_top if not ctrl_all else len(score_df)),
+                    x=score_col,
+                    y=c_col,
+                    orientation="h",
+                    color=score_col,
+                    color_continuous_scale=color_scale,
+                    title=f"<b>{model_name} — Score ranking</b>"
+                )
+                fig.update_layout(height=400, **{**T, "margin": dict(l=120, r=8, t=44, b=8)})
+                st.plotly_chart(fig, use_container_width=True)
+        elif has_flag and not df_anom.empty:
+            cnt = df_anom[c_col].value_counts().reset_index()
+            cnt.columns = [c_col, "Anomaly Count"]
+            cnt = cnt if ctrl_all else cnt.head(ctrl_top)
+            fig = px.bar(
+                cnt,
+                x="Anomaly Count",
+                y=c_col,
+                orientation="h",
+                color="Anomaly Count",
+                color_continuous_scale=color_scale,
+                title=f"<b>{model_name} — Anomaly Count</b>"
+            )
+            fig.update_layout(height=400, **T)
+            st.plotly_chart(fig, use_container_width=True)
+
     with col2:
-        display_cols = [c for c in [c_col, score_col, flag_col]
-                        if c and c in df_top.columns]
+        if has_flag and not df_anom.empty:
+            st.markdown("**Flagged countries**")
+        else:
+            st.markdown("**Top countries by score**")
+        display_cols = [c for c in [c_col, score_col, flag_col] if c and c in df_top.columns]
         if not display_cols:
             display_cols = list(df_top.columns[:3])
         st.dataframe(df_top[display_cols], use_container_width=True, hide_index=True)
@@ -281,6 +376,7 @@ def render(data: dict, df_sev, filters):
     arima       = helpers.safe_get_data(data, "arima_forecast_results")
     change_pts  = helpers.safe_get_data(data, "change_points")
     rf_pred     = helpers.safe_get_data(data, "rf_predictions")
+    rf_future   = helpers.safe_get_data(data, "rf_future_predictions")
     rf_meta     = helpers.safe_get_data(data, "rf_model_metadata")
     granger     = helpers.safe_get_data(data, "granger_causality_results")
     cox_coef    = helpers.safe_get_data(data, "coxph_coefficients")
@@ -394,7 +490,7 @@ def render(data: dict, df_sev, filters):
         ("LSTM Autoencoder",     "Deep Learning",     "Temporal",    ok(lstm),       lstm_n),
         ("KMeans",               "Clustering",        "Clustering",  ok(clusters),   None),
         ("DBSCAN",               "Clustering",        "Clustering",  ok(dbscan_df),  None),
-        ("Random Forest",        "Ensemble ML",       "Predictive",  ok(rf_pred),    None),
+        ("Random Forest",        "Ensemble ML",       "Predictive",  ok(rf_pred) or ok(rf_future), None),
         ("Granger Causality",    "Causal Inference",  "Network",     ok(granger),    granger_n),
         ("Cox PH Survival",      "Survival Model",    "Risk",        ok(cox_coef),   None),
         ("ARIMA",                "Time-Series",       "Forecasting", ok(arima),      None),
@@ -464,7 +560,15 @@ def render(data: dict, df_sev, filters):
         rank_parts = []
 
         # RF probability
-        if ok(rf_pred):
+        if ok(rf_future):
+            c_col_rf = fcol(rf_future, "country", "Country")
+            prob_col  = fcol(rf_future, "probability_shock", "probability")
+            if c_col_rf and prob_col:
+                rf_agg = (rf_future.groupby(c_col_rf)[prob_col].mean()
+                          .reset_index().rename(columns={c_col_rf: "Country",
+                                                         prob_col: "Shock Prob (avg)"}))
+                rank_parts.append(rf_agg)
+        elif ok(rf_pred):
             c_col_rf = fcol(rf_pred, "country", "Country")
             prob_col  = fcol(rf_pred, "probability", "shock_probability", "prob")
             if c_col_rf and prob_col:
@@ -654,13 +758,15 @@ confidence of being genuine structural outliers.
                 c_if  = fcol(iso_forest, "country", "Country")
                 c_lof = fcol(lof,        "country", "Country")
                 c_sv  = fcol(ocsvm_df,   "country", "Country")
-                f_if  = fcol(iso_forest, "if_anomaly_flag",   "anomaly")
-                f_lof = fcol(lof,        "lof_anomaly_flag",  "anomaly")
-                f_sv  = fcol(ocsvm_df,   "ocsvm_anomaly_flag","anomaly")
+                f_if  = fcol(iso_forest, "if_anomaly_flag",   "if_flag", "anomaly")
+                f_lof = fcol(lof,        "lof_anomaly_flag",  "lof_flag", "anomaly")
+                f_sv  = fcol(ocsvm_df,   "ocsvm_anomaly_flag","ocsvm_flag", "anomaly")
 
                 if all([c_if, c_lof, c_sv, f_if, f_lof, f_sv]):
                     def get_flagged_countries(df, c, f):
-                        anom_val = 1 if (df[f] == 1).any() else -1
+                        anom_val = get_anomaly_value(df, f)
+                        if anom_val is None:
+                            return set()
                         return set(df[df[f] == anom_val][c].dropna().unique())
 
                     flagged_all = (get_flagged_countries(iso_forest, c_if, f_if) &
@@ -1530,6 +1636,7 @@ that requires dynamic rather than static procurement strategy.
             "arima_forecast_results":     arima,
             "change_points":              change_pts,
             "rf_predictions":             rf_pred,
+            "rf_future_predictions":      rf_future,
             "granger_causality_results":  granger,
             "coxph_coefficients":         cox_coef,
             "coxph_prepared_data":        cox_prep,

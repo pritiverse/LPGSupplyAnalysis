@@ -20,6 +20,12 @@ def render_detection(data, filtered_df, filters):
     import plotly.express as px
     from datetime import datetime
     import json
+    from io import BytesIO
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import inch
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image, PageBreak
     from utils.constants import PLOTLY_DARK
     
     # =====================================================================
@@ -212,7 +218,8 @@ def render_detection(data, filtered_df, filters):
             'rf_predictions': None,
             'shock_severity': None,
             'shock_global_country_rank': None,
-            'combined_yearly_summary': None
+            'combined_yearly_summary': None,
+            'rf_future_predictions': None
         }
         
         for key in sources:
@@ -229,13 +236,160 @@ def render_detection(data, filtered_df, filters):
     shock_sev = sources['shock_severity']
     global_rank = sources['shock_global_country_rank']
     yearly_summary = sources['combined_yearly_summary']
+    rf_future_preds = sources.get('rf_future_predictions')
     
     # Check if we have ANY data
-    has_data = any([anomaly_dash is not None, rf_pred is not None, shock_sev is not None])
+    has_data = any([anomaly_dash is not None, rf_pred is not None, shock_sev is not None, rf_future_preds is not None])
     
     if not has_data:
         st.error("❌ No risk data available. Please ensure pipeline has generated required outputs.")
         return
+    
+    def _safe_number(value, default=0.0):
+        return float(value) if pd.notna(value) else default
+    
+    def _fig_to_png_bytes(fig):
+        try:
+            return fig.to_image(format="png", width=1400, height=800, scale=2)
+        except Exception:
+            return None
+    
+    def _df_for_pdf(df, max_rows=20):
+        if df is None or len(df) == 0:
+            return [["No data available"]]
+        clipped = df.head(max_rows).copy()
+        for col in clipped.columns:
+            clipped[col] = clipped[col].apply(
+                lambda x: f"{x:.3f}" if isinstance(x, (int, float)) and not isinstance(x, bool) else str(x)
+            )
+        return [list(clipped.columns)] + clipped.astype(str).values.tolist()
+    
+    def _build_pdf_report(report_context):
+        buffer = BytesIO()
+        doc = SimpleDocTemplate(
+            buffer,
+            pagesize=A4,
+            rightMargin=24,
+            leftMargin=24,
+            topMargin=24,
+            bottomMargin=24
+        )
+        styles = getSampleStyleSheet()
+        title_style = styles["Title"]
+        heading_style = styles["Heading2"]
+        body_style = styles["BodyText"]
+        small_style = ParagraphStyle("Small", parent=styles["BodyText"], fontSize=8, leading=10)
+        
+        elements = []
+        elements.append(Paragraph("LPG Risk Intelligence Dashboard Report", title_style))
+        elements.append(Spacer(1, 0.15 * inch))
+        elements.append(Paragraph(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", body_style))
+        elements.append(Paragraph("This report captures the current Tab 5 dashboard view including key metrics, insights, charts, and ranking tables.", body_style))
+        elements.append(Spacer(1, 0.2 * inch))
+        
+        metric_rows = [["Metric", "Value"]]
+        for label, value in report_context["metrics_rows"]:
+            metric_rows.append([label, value])
+        metric_table = Table(metric_rows, repeatRows=1, colWidths=[3.0 * inch, 2.8 * inch])
+        metric_table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1f2937")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.whitesmoke, colors.lightgrey]),
+            ("VALIGN", (0, 0), (-1, -1), "TOP")
+        ]))
+        elements.append(Paragraph("Global Risk Snapshot", heading_style))
+        elements.append(metric_table)
+        elements.append(Spacer(1, 0.18 * inch))
+        
+        if report_context["insights"]:
+            elements.append(Paragraph("System Insights", heading_style))
+            for idx, insight in enumerate(report_context["insights"], start=1):
+                elements.append(Paragraph(f"{idx}. {insight}", body_style))
+            elements.append(Spacer(1, 0.12 * inch))
+        
+        if report_context["alerts"]:
+            elements.append(Paragraph("Critical Alerts", heading_style))
+            for alert in report_context["alerts"]:
+                elements.append(Paragraph(f"• {alert}", body_style))
+            elements.append(Spacer(1, 0.12 * inch))
+        
+        if report_context["selected_country_summary"]:
+            elements.append(Paragraph("Selected Country Profile", heading_style))
+            for item in report_context["selected_country_summary"]:
+                elements.append(Paragraph(f"• {item}", body_style))
+            elements.append(Spacer(1, 0.12 * inch))
+        
+        chart_sections = [
+            ("Global Risk Map", report_context.get("fig_choropleth")),
+            ("Risk Segmentation", report_context.get("fig_pie")),
+            ("Highest-Risk Countries", report_context.get("fig_bar")),
+            ("Risk Trend", report_context.get("fig_timeline")),
+            ("Risk Momentum", report_context.get("fig_momentum")),
+            ("Forecast Distribution", report_context.get("fig_prob_dist")),
+            ("Forecast Ranking", report_context.get("fig_forecast")),
+        ]
+        
+        for title, fig in chart_sections:
+            if fig is None:
+                continue
+            png_bytes = _fig_to_png_bytes(fig)
+            if png_bytes is None:
+                continue
+            elements.append(PageBreak())
+            elements.append(Paragraph(title, heading_style))
+            img = Image(BytesIO(png_bytes), width=7.2 * inch, height=4.2 * inch)
+            elements.append(img)
+            elements.append(Spacer(1, 0.12 * inch))
+        
+        table_sections = [
+            ("Risk Segmentation Table", report_context.get("seg_counts")),
+            ("Highest-Risk Countries Table", report_context.get("watchlist_display")),
+            ("Forecast Ranking Table", report_context.get("top_forecast_display")),
+        ]
+        
+        for title, df in table_sections:
+            if df is None or len(df) == 0:
+                continue
+            elements.append(PageBreak())
+            elements.append(Paragraph(title, heading_style))
+            table_data = _df_for_pdf(df, max_rows=25)
+            pdf_table = Table(table_data, repeatRows=1)
+            pdf_table.setStyle(TableStyle([
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1f2937")),
+                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                ("GRID", (0, 0), (-1, -1), 0.4, colors.grey),
+                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("FONTSIZE", (0, 0), (-1, -1), 8),
+                ("LEADING", (0, 0), (-1, -1), 10),
+                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.whitesmoke, colors.beige]),
+            ]))
+            elements.append(pdf_table)
+            elements.append(Spacer(1, 0.12 * inch))
+        
+        elements.append(PageBreak())
+        elements.append(Paragraph("Report Notes", heading_style))
+        elements.append(Paragraph("Charts and tables reflect the current dashboard filters and controls selected at the time of download.", small_style))
+        elements.append(Paragraph("If a chart or table is unavailable in the current session, it is omitted from the PDF.", small_style))
+        
+        doc.build(elements)
+        buffer.seek(0)
+        return buffer.getvalue()
+    
+    fig_choropleth = None
+    fig_pie = None
+    fig_bar = None
+    fig_timeline = None
+    fig_momentum = None
+    fig_prob_dist = None
+    fig_forecast = None
+    seg_counts = None
+    watchlist_display = None
+    top_forecast_display = None
+    insights = []
+    alerts = []
+    selected_country_summary = []
     
     # =====================================================================
     # DASHBOARD HEADER
@@ -312,7 +466,7 @@ def render_detection(data, filtered_df, filters):
         <div class="metric-card">
             <div class="metric-label">High-Risk Forecast</div>
             <div class="metric-value" style="color: #8b5cf6;">{metrics['high_probability_count']}</div>
-            <div style="font-size: 0.75rem; color: #94a3b8;">P(Shock) > 70%</div>
+            <div style="font-size: 0.75rem; color: #94a3b8;">P(Shock) > 60%</div>
         </div>
         """, unsafe_allow_html=True)
     
@@ -383,7 +537,11 @@ def render_detection(data, filtered_df, filters):
                 insights.append(f"Risk exposure is **{skew}** (std dev: {std_dev:.1f})")
             
             # Insight 2: Shock probability
-            if rf_pred is not None and 'probability' in rf_pred.columns:
+            if rf_future_preds is not None and 'probability_shock' in rf_future_preds.columns:
+                shock_median = rf_future_preds['probability_shock'].median()
+                prob_interpretation = "elevated global vulnerability" if shock_median > 0.5 else "moderate global conditions"
+                insights.append(f"Median future shock probability suggests **{prob_interpretation}** ({shock_median:.1%})")
+            elif rf_pred is not None and 'probability' in rf_pred.columns:
                 shock_median = rf_pred['probability'].median()
                 prob_interpretation = "elevated global vulnerability" if shock_median > 0.5 else "moderate global conditions"
                 insights.append(f"Median shock probability suggests **{prob_interpretation}** ({shock_median:.1%})")
@@ -414,7 +572,11 @@ def render_detection(data, filtered_df, filters):
                     alerts.append(('critical', f"{critical} countries exceed critical risk threshold (≥10)"))
             
             # Alert: High shock probability
-            if rf_pred is not None and 'probability' in rf_pred.columns:
+            if rf_future_preds is not None and 'probability_shock' in rf_future_preds.columns:
+                extreme = len(rf_future_preds[rf_future_preds['probability_shock'] > 0.65])
+                if extreme > 0:
+                    alerts.append(('critical', f"{extreme} countries show extreme future shock probability (>65%)"))
+            elif rf_pred is not None and 'probability' in rf_pred.columns:
                 extreme = len(rf_pred[rf_pred['probability'] > 0.8])
                 if extreme > 0:
                     alerts.append(('critical', f"{extreme} countries show extreme shock probability (>80%)"))
@@ -508,7 +670,25 @@ def render_detection(data, filtered_df, filters):
                     """, unsafe_allow_html=True)
                 
                 # Next-year shock probability
-                if rf_pred is not None:
+                if rf_future_preds is not None and 'probability_shock' in rf_future_preds.columns:
+                    pred_data = rf_future_preds[rf_future_preds['country'] == selected_country]
+                    if not pred_data.empty:
+                        next_year = pred_data['year'].min()
+                        shock_prob = pred_data[pred_data['year'] == next_year].iloc[0].get('probability_shock', 0)
+                        if shock_prob > 0.6:
+                            prob_color = "#ef4444"
+                            prob_label = "HIGH"
+                        elif shock_prob > 0.5:
+                            prob_color = "#f59e0b"
+                            prob_label = "ELEVATED"
+                        else:
+                            prob_color = "#10b981"
+                            prob_label = "MODERATE"
+                    else:
+                        shock_prob = 0
+                        prob_color = "#64748b"
+                        prob_label = "N/A"
+                elif rf_pred is not None:
                     pred_data = rf_pred[rf_pred['country'] == selected_country]
                     if not pred_data.empty:
                         shock_prob = pred_data.iloc[0].get('probability', 0)
@@ -533,7 +713,7 @@ def render_detection(data, filtered_df, filters):
                 with col_profile2:
                     st.markdown(f"""
                     <div class="risk-card">
-                        <div class="metric-label">NEXT-YEAR SHOCK PROBABILITY</div>
+                        <div class="metric-label">FUTURE SHOCK PROBABILITY</div>
                         <div class="metric-value" style="color: {prob_color};">{shock_prob:.1%}</div>
                         <div style="color: {prob_color}; font-weight: 600; margin-top: 0.5rem;">→ {prob_label} PROBABILITY</div>
                     </div>
@@ -561,6 +741,13 @@ def render_detection(data, filtered_df, filters):
                         <div style="color: {flag_color}; font-weight: 600; margin-top: 0.5rem;">→ {flag_label}</div>
                     </div>
                     """, unsafe_allow_html=True)
+                
+                selected_country_summary = [
+                    f"Country: {selected_country}",
+                    f"Composite risk score: {risk_score:.2f} / 20 ({risk_level})",
+                    f"Next-year shock probability: {shock_prob:.1%}",
+                    f"Model agreement: {flag_count} / 9 ({flag_label})"
+                ]
                 
                 st.divider()
                 
@@ -744,9 +931,94 @@ def render_detection(data, filtered_df, filters):
     # =====================================================================
     # SECTION 7: PREDICTIVE ANALYTICS
     # =====================================================================
-    with st.expander("🔮 Next-Year Shock Probability Forecasts", expanded=False):
-        if rf_pred is not None and 'probability' in rf_pred.columns:
-            st.markdown("#### Predicted Shock Probabilities")
+    with st.expander("🔮 Future Shock Probability Forecasts", expanded=False):
+        if rf_future_preds is not None and 'probability_shock' in rf_future_preds.columns:
+            st.markdown("#### Predicted Shock Probabilities (Future Years)")
+            
+            years = sorted(rf_future_preds['year'].unique())
+            
+            if not years:
+                st.info("No forecast years available.")
+            else:
+                selected_year = st.selectbox("Select Forecast Year", years)
+                forecast_base = rf_future_preds[rf_future_preds['year'] == selected_year].copy()
+                
+                col_pred1, col_pred2 = st.columns(2)
+                
+                with col_pred1:
+                    st.markdown(f"**Distribution of Shock Probabilities ({selected_year})**")
+                    fig_prob_dist = px.histogram(
+                        forecast_base,
+                        x='probability_shock',
+                        nbins=20,
+                        title=f'Probability Distribution ({selected_year})',
+                        labels={'probability_shock': 'Shock Probability'}
+                    )
+                    fig_prob_dist.update_layout(**PLOTLY_DARK, height=350)
+                    st.plotly_chart(fig_prob_dist, use_container_width=True)
+                
+                with col_pred2:
+                    st.metric("Mean Probability", f"{forecast_base['probability_shock'].mean():.1%}")
+                    st.metric("Median Probability", f"{forecast_base['probability_shock'].median():.1%}")
+                    st.metric("Countries > 60% Risk", f"{len(forecast_base[forecast_base['probability_shock'] > 0.6])}")
+                    st.metric("Countries > 50% Risk", f"{len(forecast_base[forecast_base['probability_shock'] > 0.5])}")
+                
+                st.divider()
+                
+                st.markdown(f"**Top Forecast Countries for {selected_year}**")
+                forecast_count = min(
+                    st.slider(
+                        "Forecast countries to show",
+                        min_value=5,
+                        max_value=min(25, len(forecast_base)),
+                        value=min(10, len(forecast_base)),
+                        step=1,
+                        key="tab5_future_forecast_count"
+                    ),
+                    len(forecast_base)
+                )
+                forecast_sort = st.radio(
+                    "Forecast display order",
+                    options=["Highest first", "Lowest first"],
+                    horizontal=True,
+                    key="tab5_future_forecast_sort"
+                )
+                
+                top_forecast = forecast_base.nlargest(forecast_count, 'probability_shock')[['country', 'probability_shock']].copy()
+                top_forecast = top_forecast.rename(columns={'country': 'Country', 'probability_shock': 'P(Shock)'})
+                top_forecast_display = top_forecast.sort_values(
+                    'P(Shock)',
+                    ascending=(forecast_sort == "Lowest first")
+                ).reset_index(drop=True)
+                
+                st.dataframe(
+                    top_forecast_display,
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        'P(Shock)': st.column_config.NumberColumn("P(Shock)", format="%.4f")
+                    }
+                )
+                
+                fig_forecast = px.bar(
+                    top_forecast_display,
+                    x='P(Shock)',
+                    y='Country',
+                    color='P(Shock)',
+                    color_continuous_scale='Reds',
+                    title=f'Top {forecast_count} Forecast Countries for {selected_year}',
+                    orientation='h'
+                )
+                fig_forecast.update_layout(
+                    **PLOTLY_DARK,
+                    height=max(350, 28 * len(top_forecast_display) + 120),
+                    coloraxis_showscale=False,
+                    yaxis={'categoryorder': 'array', 'categoryarray': top_forecast_display['Country'].tolist()}
+                )
+                st.plotly_chart(fig_forecast, use_container_width=True)
+                
+        elif rf_pred is not None and 'probability' in rf_pred.columns:
+            st.markdown("#### Predicted Shock Probabilities (Next Year)")
             
             rf_pred_clean = rf_pred.dropna(subset=['country', 'probability']).copy()
             time_col = next((col for col in ['date', 'Date', 'year', 'Year'] if col in rf_pred_clean.columns), None)
@@ -853,6 +1125,31 @@ def render_detection(data, filtered_df, filters):
             )
             st.plotly_chart(fig_forecast, use_container_width=True)
     
+    metrics_rows = [
+        ("Critical Risk Countries", str(metrics['critical_countries'])),
+        ("Global Average Risk", f"{metrics['avg_risk_score']:.2f}"),
+        ("Average Shock Probability", f"{metrics['shock_probability_avg']:.2%}"),
+        ("High-Risk Forecast Countries", str(metrics['high_probability_count'])),
+        ("Total Countries", str(metrics['total_countries']))
+    ]
+    
+    pdf_report_bytes = _build_pdf_report({
+        "metrics_rows": metrics_rows,
+        "insights": insights,
+        "alerts": [message for _, message in alerts],
+        "selected_country_summary": selected_country_summary,
+        "fig_choropleth": fig_choropleth,
+        "fig_pie": fig_pie,
+        "fig_bar": fig_bar,
+        "fig_timeline": fig_timeline,
+        "fig_momentum": fig_momentum,
+        "fig_prob_dist": fig_prob_dist,
+        "fig_forecast": fig_forecast,
+        "seg_counts": seg_counts,
+        "watchlist_display": watchlist_display,
+        "top_forecast_display": top_forecast_display
+    })
+    
     # =====================================================================
     # SECTION 8: MODEL DIAGNOSTICS & EXPORTS
     # =====================================================================
@@ -891,6 +1188,13 @@ def render_detection(data, filtered_df, filters):
         # Export options
         st.markdown("#### 📥 Export Data")
         
+        st.download_button(
+            label="📄 Download Full Dashboard Report (PDF)",
+            data=pdf_report_bytes,
+            file_name=f"tab5_risk_dashboard_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
+            mime="application/pdf"
+        )
+        
         col_exp1, col_exp2, col_exp3 = st.columns(3)
         
         with col_exp1:
@@ -904,7 +1208,15 @@ def render_detection(data, filtered_df, filters):
                 )
         
         with col_exp2:
-            if rf_pred is not None:
+            if rf_future_preds is not None:
+                csv_buffer = rf_future_preds.to_csv(index=False)
+                st.download_button(
+                    label="🔮 RF Future Predictions (CSV)",
+                    data=csv_buffer,
+                    file_name=f"rf_future_predictions_{datetime.now().strftime('%Y%m%d')}.csv",
+                    mime="text/csv"
+                )
+            elif rf_pred is not None:
                 csv_buffer = rf_pred.to_csv(index=False)
                 st.download_button(
                     label="🔮 RF Predictions (CSV)",
