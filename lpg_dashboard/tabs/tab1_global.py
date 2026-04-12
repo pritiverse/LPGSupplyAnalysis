@@ -30,9 +30,9 @@ def render(data, df_sev, filters=None):
     # =========================================================
     # --- Severity counts ---
     if 'ShockSeverity' in df_sev.columns:
-        strong = (df_sev['ShockSeverity'] == 'Strong').sum()
+        strong   = (df_sev['ShockSeverity'] == 'Strong').sum()
         moderate = (df_sev['ShockSeverity'] == 'Moderate').sum()
-        weak = (df_sev['ShockSeverity'] == 'Weak').sum()
+        weak     = (df_sev['ShockSeverity'] == 'Weak').sum()
     else:
         strong = moderate = weak = 0
 
@@ -70,10 +70,10 @@ def render(data, df_sev, filters=None):
     # --- KPI display ---
     c1, c2, c3, c4, c5 = st.columns(5)
     c1.metric("🌍 Countries monitored", len(df_sev))
-    c2.metric("🔴 Strong risk", int(strong))
-    c3.metric("🟠 Moderate risk", int(moderate))
-    c4.metric("⚡ Structural breaks", int(n_cp))
-    c5.metric("🔍 Anomalies detected", f"{anomaly_count:,}")
+    c2.metric("🔴 Strong risk",          int(strong))
+    c3.metric("🟠 Moderate risk",        int(moderate))
+    c4.metric("⚡ Structural breaks",    int(n_cp))
+    c5.metric("🔍 Anomalies detected",   f"{anomaly_count:,}")
 
     st.divider()
 
@@ -81,6 +81,10 @@ def render(data, df_sev, filters=None):
     # WORLD MAP
     # =========================================================
     st.subheader("🌎 Shock Severity by Country")
+    st.caption(
+        "**Powered by**: Rule-based severity scoring from `shock_severity` pipeline "
+        "(ShockScore → Strong / Moderate / Weak / Normal)"
+    )
 
     if 'country' not in df_sev.columns:
         st.error("Missing 'country' column for map")
@@ -97,15 +101,14 @@ def render(data, df_sev, filters=None):
                 hover_name='country',
                 hover_data={
                     'ShockScore': ':.2f' if 'ShockScore' in map_data.columns else False,
-                    'region': True if 'region' in map_data.columns else False,
-                    'iso': False
+                    'region':     True    if 'region'     in map_data.columns else False,
+                    'iso':        False,
                 },
                 color_discrete_map=SEVERITY_COLORS,
                 category_orders={"ShockSeverity": SEVERITY_ORDER},
                 projection='natural earth',
-                title="<b>Global Supply Chain Shock Severity</b>"
+                title="<b>Global Supply Chain Shock Severity</b>",
             )
-
             fig_map.update_layout(
                 height=500,
                 margin=dict(l=0, r=0, t=40, b=0),
@@ -116,31 +119,33 @@ def render(data, df_sev, filters=None):
                     showland=True,
                     landcolor="#0d1b2a",
                     showocean=True,
-                    oceancolor="#07111c"
-                )
+                    oceancolor="#07111c",
+                ),
             )
             apply_plotly_dark(fig_map)
             st.plotly_chart(fig_map, use_container_width=True)
         else:
-            st.warning("No map data available - missing ISO codes")
+            st.warning("No map data available — missing ISO codes")
 
     st.divider()
 
     # =========================================================
-    # SEVERITY DISTRIBUTION & TOP COUNTRIES
+    # SEVERITY DISTRIBUTION  &  TOP COUNTRIES
     # =========================================================
     col_left, col_right = st.columns(2)
 
     with col_left:
         st.subheader("📊 Severity Distribution")
+        st.caption(
+            "**Statistical aggregation**: Country counts by severity class "
+            "from shock severity model"
+        )
 
         if 'ShockSeverity' in df_sev.columns:
             counts = df_sev['ShockSeverity'].value_counts()
-
             for cat in SEVERITY_ORDER:
                 if cat not in counts:
                     counts[cat] = 0
-
             counts = counts[SEVERITY_ORDER]
 
             fig_pie = px.pie(
@@ -148,15 +153,18 @@ def render(data, df_sev, filters=None):
                 names=counts.index,
                 color=counts.index,
                 color_discrete_map=SEVERITY_COLORS,
-                hole=0.45
+                hole=0.45,
             )
-
             fig_pie.update_traces(textinfo='percent+label')
             fig_pie.update_layout(**PLOTLY_DARK)
             st.plotly_chart(fig_pie, use_container_width=True)
 
     with col_right:
         st.subheader("⚠️ Highest-Risk Countries")
+        st.caption(
+            "**Ranking model**: Top countries by ShockScore "
+            "(higher = greater systemic risk)"
+        )
 
         if 'ShockScore' in df_sev.columns:
             n_top = table_limit("risk_tab1", default=15)
@@ -166,7 +174,6 @@ def render(data, df_sev, filters=None):
                 if n_top > 0 else
                 df_sev.sort_values('ShockScore', ascending=False)
             )
-
             top_df = top_df.reset_index(drop=True)
             top_df['rank'] = top_df.index + 1
 
@@ -177,12 +184,9 @@ def render(data, df_sev, filters=None):
                 orientation='h',
                 color='ShockSeverity',
                 color_discrete_map=SEVERITY_COLORS,
-                category_orders={"ShockSeverity": SEVERITY_ORDER}
+                category_orders={"ShockSeverity": SEVERITY_ORDER},
             )
-
-            fig_top.update_layout(
-                height=max(400, len(top_df) * 28)
-            )
+            fig_top.update_layout(height=max(400, len(top_df) * 28))
             apply_plotly_dark(fig_top)
             st.plotly_chart(fig_top, use_container_width=True)
 
@@ -192,63 +196,69 @@ def render(data, df_sev, filters=None):
     # REGION SUMMARY
     # =========================================================
     st.subheader("📋 Regional Risk Summary")
+    st.caption(
+        "**Regional aggregation**: Mean ShockScore by country grouping "
+        "(from global severity model)"
+    )
 
     if {'region', 'ShockScore'}.issubset(df_sev.columns):
-
         region_summary = (
             df_sev.groupby('region')
             .agg(
-                Countries=('country', 'count'),
+                Countries=('country',    'count'),
                 Avg_ShockScore=('ShockScore', 'mean'),
-                Max_ShockScore=('ShockScore', 'max')
+                Max_ShockScore=('ShockScore', 'max'),
             )
             .round(2)
             .sort_values('Avg_ShockScore', ascending=False)
             .reset_index()
         )
-
         st.dataframe(region_summary, use_container_width=True)
 
     st.divider()
-# tabs/tab1_global.py (Updated anomaly hotspot section)
-# ... (previous code remains the same until the anomaly hotspots section)
 
     # =========================================================
-    # ANOMALY HOTSPOTS - UPDATED FOR ACTUAL COLUMN NAMES
+    # ANOMALY HOTSPOTS
     # =========================================================
     st.subheader("🔥 Structural Anomaly Hotspots")
-    st.caption("Countries flagged by structural detection methods (LOF, OCSVM, Isolation Forest, Change Points)")
-    
+    st.caption("**Powered by**: **LOF + OCSVM + Isolation Forest + Change Points** (4 structural models)")
+    st.caption("• **LOF**: Local density outliers vs peer countries")
+    st.caption("• **OCSVM**: Non-linear boundary violations")
+    st.caption("• **Isolation Forest**: Multi-dimensional isolation")
+    st.caption("• **Change Points**: Regime shift detection")
+
     cca = data.get('anomaly_dashboard')
     if cca is not None:
-        # Define structural flags and create composite score on the fly
+        cca = cca.copy()
+
+        # Ensure all structural flag columns exist
         structural_flags = ['lof_flag', 'ocsvm_flag', 'if_flag', 'cp_flag']
         for flag in structural_flags:
             if flag not in cca.columns:
-                cca[flag] = 0  # Assume 0 if flag column is missing
+                cca[flag] = 0
 
         cca['composite_country_anomaly_score'] = cca[structural_flags].sum(axis=1)
 
-        # Use the actual composite score
-        cca_show = cca.sort_values('composite_country_anomaly_score', ascending=False)
-        cca_show = cca_show[cca_show['composite_country_anomaly_score'] > 0]  # Only show flagged countries
-        
+        cca_show = cca[cca['composite_country_anomaly_score'] > 0].sort_values(
+            'composite_country_anomaly_score', ascending=False
+        )
+
         if not cca_show.empty:
-            n_hot = table_limit("hotspots", default=15)
+            n_hot   = table_limit("hotspots", default=15)
             cca_show = cca_show if n_hot == 0 else cca_show.head(n_hot)
             cca_show = cca_show.sort_values('composite_country_anomaly_score', ascending=True)
-            
-            # Build tooltip text with individual flags (using corrected flag names)
-            cca_show['flags'] = cca_show.apply(
-                lambda x: ', '.join(filter(None, [
-                    'LOF' if x.get('lof_flag') else None,
-                    'OCSVM' if x.get('ocsvm_flag') else None,
-                    'IF' if x.get('if_flag') else None,
-                    'CP' if x.get('cp_flag') else None,
-                ])),
-                axis=1
-            )
-            
+
+            # Build human-readable flag tooltip
+            def _flag_label(row):
+                parts = []
+                if row.get('lof_flag'):   parts.append('LOF')
+                if row.get('ocsvm_flag'): parts.append('OCSVM')
+                if row.get('if_flag'):    parts.append('IF')
+                if row.get('cp_flag'):    parts.append('CP')
+                return ', '.join(parts)
+
+            cca_show['flags'] = cca_show.apply(_flag_label, axis=1)
+
             fig_hot = px.bar(
                 cca_show,
                 x='composite_country_anomaly_score',
@@ -260,32 +270,37 @@ def render(data, df_sev, filters=None):
                 labels={
                     'composite_country_anomaly_score': 'Structural Anomaly Score',
                     'country': '',
-                    'flags': 'Detection Methods'
+                    'flags':   'Detection Methods',
                 },
-                title="<b>Countries with Structural Anomalies</b>"
+                title="<b>Countries with Structural Anomalies</b>",
             )
-            
             fig_hot.update_layout(
                 yaxis={'categoryorder': 'total ascending'},
                 height=max(400, len(cca_show) * 28),
-                xaxis_title="Number of Structural Methods Flagging Country"
+                xaxis_title="Number of Structural Methods Flagging Country",
             )
             apply_plotly_dark(fig_hot)
             st.plotly_chart(fig_hot, use_container_width=True)
-            
+
             st.markdown(
                 '<div class="insight-box">'
                 '<b>💡 Structural vs. Temporal Anomalies:</b><br>'
-                '• <b>Structural anomalies</b> (LOF, OCSVM, IF) identify countries fundamentally different from global norms.<br>'
-                '• <b>Temporal anomalies</b> (EWMA, Prophet, LSTM) identify specific years with supply disruptions.<br>'
-                '• <b>Change Points (CP)</b> identify regime shifts in a country\'s supply trajectory.'
+                '• <b>Structural anomalies</b> (LOF, OCSVM, IF) identify countries '
+                'fundamentally different from global norms.<br>'
+                '• <b>Temporal anomalies</b> (EWMA, Prophet, LSTM) identify specific '
+                'years with supply disruptions.<br>'
+                "• <b>Change Points (CP)</b> identify regime shifts in a country's "
+                'supply trajectory.'
                 '</div>',
-                unsafe_allow_html=True
+                unsafe_allow_html=True,
             )
         else:
             st.info("No structural anomalies detected in the data")
     else:
         st.info("Structural anomaly data not available")
+
+    st.divider()
+
     # =========================================================
     # EXECUTIVE INSIGHTS
     # =========================================================
